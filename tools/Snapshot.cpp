@@ -684,7 +684,8 @@ void testBypassAndMono()
 
 void saveSnapshot (Component& c, const File& file)
 {
-    const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
+    // 2x, so the images stay crisp on high-resolution screens (README, docs)
+    const auto image = c.createComponentSnapshot (c.getLocalBounds(), true, 2.0f);
     file.deleteFile();
     FileOutputStream stream (file);
     check (stream.openedOk() && PNGImageFormat().writeImageToStream (image, stream), "wrote " + file.getFileName());
@@ -697,6 +698,7 @@ void writeScreenshots (const File& outDir)
 
     struct Shot { const char* preset; int module; const char* file; };
     const Shot shots[] = {
+        { "Glitch Machine", hl::dsp::moduleTrash, "0-hero.png" },
         { "Multiband Crunch", hl::dsp::moduleTrash, "1-trash.png" },
         { "Screaming Filter", hl::dsp::moduleFilter1, "2-filter.png" },
         { "Spring Drip", hl::dsp::moduleConvolve, "3-convolve.png" },

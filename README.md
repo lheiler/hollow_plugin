@@ -1,147 +1,183 @@
-# Hollow
+<h1 align="center">hollow</h1>
 
-A creative distortion and texture plugin (VST3 + standalone) in the spirit of iZotope Trash 2, built with JUCE 9 and
-the same toolchain and design language as [Supervisor](../supervisor).
+<p align="center">
+  <b>A distortion and texture plugin.</b><br>
+  Eight effects in any order, modulation everywhere, and a dice.
+</p>
 
-Eight effect modules sit in a chain you can **reorder by dragging**. Two LFOs, an envelope follower and a macro feed
-a modulation matrix. That combination is the point: fuzz *after* a cistern reverb, chorus *into* a wavefolder, an
-envelope opening a vowel filter in front of a bitcrusher.
+<p align="center">
+  <img alt="Formats: VST3, AU, Standalone" src="https://img.shields.io/badge/formats-VST3%20%C2%B7%20AU%20%C2%B7%20Standalone-1b2a40">
+  <img alt="Platforms: Windows, macOS" src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS-3b76b3">
+  <img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-f07f3c">
+  <img alt="Built with JUCE 9" src="https://img.shields.io/badge/built%20with-JUCE%209-53647a">
+</p>
 
-## Modules
+![Hollow, with the Glitch Machine preset](docs/images/hero.jpg)
 
-| Module | What it does |
-|---|---|
-| **Trash** | 26 distortion algorithms in 7 families (saturate, clip, fuzz, fold, rectify, digital, harmonic). Up to 3 bands (phase-aligned Linkwitz-Riley crossovers), each blending two algorithms (A/B morph) with drive, bias, tone, mix and level. 4x linear-phase oversampling. Auto gain is calibrated by measurement per algorithm and drive, so drive changes the character rather than just the level. |
-| **Filter 1 / Filter 2** | LP/HP/BP 12 and 24 dB, notch, comb +/-, vowel formants. The resonance saturates like an analog filter (it screams but stays bounded), with drive, mix and per-sample cutoff glide for fast modulation. |
-| **Convolve** | 20 *synthesised* impulses: speaker cabinets, radio, telephone, megaphone, torn cone, tin can, metal bowl, steel pipe, glass jar, cardboard box, gong, spring tank, steel plate, closet, tiled room, tunnel, concrete hall, cistern. Because they're modelled, **Size** genuinely rescales the object, **Damp** darkens the tail over time and **Reverse** flips it. Zero-latency partitioned convolution; impulses are built on a worker thread and crossfaded in. |
-| **Motion** | Chorus, flanger, phaser, vibrato, tremolo (feedback squares it into a chop, spread turns it into auto-pan), ring mod, and a Hilbert frequency shifter (feedback gives barber-pole swirls). Tempo sync. |
-| **Degrade** | Tape wow and flutter, age (bandwidth loss + saturation), hiss, vinyl crackle, random dropouts, and **glitch**: a tempo-synced sampler that randomly stutters, reverses and half-speeds slices on a 16th-note grid. |
-| **Dynamics** | Gate into a stereo-linked soft-knee compressor with parallel mix: pull a distortion's noise floor up into sustain, or chop it into gated textures. |
-| **Echo** | Tape echo: time changes glide (pitch bends), drive and tone inside the loop degrade every repeat, wobble, ping-pong, tempo sync. Feedback goes to 120%: it runs away and self-oscillates, but the saturating loop keeps it bounded. |
+Hollow runs your sound through eight effects: distortion, two filters, convolution, modulation effects, tape and vinyl
+damage, dynamics and a tape echo. Drag them into any order (fuzz *after* a reverb, chorus *into* a wavefolder),
+modulate almost anything, and let the dice come up with combinations you wouldn't have tried.
 
-**Modulation**: LFO 1 and 2 (sine, triangle, ramps, square, sample & hold, smooth random; free or host-synced and
-phase-locked to the song position), an envelope follower and a macro knob. The 8-slot matrix reaches ~40
-destinations. Right-click any knob to route a source to it. Modulated knobs show a live orange ring, and every
-display (filter curve, transfer curve, morph pad) follows the modulation.
+## Highlights
 
-**Modulation sources**: LFO 1 and 2, the envelope follower and two macro knobs (Macro 1 / Macro 2).
+- **26 distortion algorithms** in seven families, up to three bands, each morphing between two algorithms
+- **A chain you can reorder** by dragging: the same modules in a different order are a different instrument
+- **Modulation everywhere**: two LFOs, an envelope follower and two macros through an 8-slot matrix; right-click
+  any knob to modulate it, and every display moves with it
+- **20 synthesised impulses**: speaker cabinets, telephone, tin can, gong, spring tank, cistern. Because they're
+  modelled, *Size* really rescales the object
+- **Tape and vinyl damage** with a glitch engine that stutters, reverses and half-speeds slices in time with your song
+- **Presets and dice**: 27 factory presets, save and import your own, randomize with rules
+- **Auto Level**: every patch comes out at the loudness of what goes in, worked out from the settings, so it's right
+  before anything plays
+- **Oversampling from 1x to 8x** at constant latency; render at 8x while playing at less
+- **Undo and redo**, an interface that zooms from 80 to 150 %, and no surprises in level thanks to a soft clip guard
 
-**Presets and dice**: 27 factory presets in five groups (Drive, Lo-Fi, Motion, Space, Chaos), several with unusual chain
-orders. **Save** stores the current sound in `Documents/Hollow/Presets` (`.hollowpreset`, plain XML); saved presets appear
-under "Saved" at the end of the preset list and the arrows step through both. **Randomize** rolls a new chain:
-modules, order, algorithms and modulation routes, within ranges that stay musical.
+## The modules
 
-**Presets on disk**: `.hollowpreset` files (plain XML) in `Documents/Hollow/Presets` by default, the same kind of place
-FabFilter, Serum, Vital or u-he use on Windows. The folder can be changed in the menu. **Import...** (or dropping files
-onto the window) copies presets in without ever overwriting: a clash gets a " (2)" suffix and identical copies are
-skipped. The preset list re-reads the folder each time it opens.
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/trash.jpg" alt="Trash"><br>
+<b>Trash</b>: saturate, clip, fuzz, fold, rectify, digital and harmonic algorithms. Up to three bands, each blending
+two algorithms on a morph and drive pad, with bias, tone, mix and level. The transfer curve shows how hard each band
+is being hit.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/filter.jpg" alt="Filter"><br>
+<b>Filter 1 and 2</b>: low, high and band-pass (12 and 24 dB), notch, combs and vowel formants. The resonance screams
+but stays bounded. Drag the node, or let an LFO do it: the curve follows live.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/convolve.jpg" alt="Convolve"><br>
+<b>Convolve</b>: cabinets, radio, telephone, megaphone, found objects, spring and plate, rooms up to a cistern. Size,
+damp and reverse, with zero added latency.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/motion.jpg" alt="Motion"><br>
+<b>Motion</b>: chorus, flanger, phaser, vibrato, tremolo (chop and auto-pan), ring modulator and a frequency shifter
+with barber-pole feedback. Free-running or locked to the host tempo.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/degrade.jpg" alt="Degrade"><br>
+<b>Degrade</b>: wow, flutter, worn tape, hiss, vinyl crackle, dropouts, and glitch: random stutters, reverses and
+half-speed repeats on a 16th-note grid.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/dynamics.jpg" alt="Dynamics"><br>
+<b>Dynamics</b>: a gate into a soft-knee compressor with parallel mix. Pull a distortion's tail up into sustain or
+chop it into gated textures.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/images/echo.jpg" alt="Echo"><br>
+<b>Echo</b>: a tape echo whose repeats pass through drive and tone every time. Time changes glide into pitch bends,
+and past 100 % feedback it runs away into a self-oscillating wall that still stays under control.
+</td>
+<td width="50%" valign="top">
+<img src="docs/images/menu.jpg" alt="Menu"><br>
+<b>Menu</b>: Auto Level and clip guard, oversampling (playback and render), interface size, what the dice may
+change, and your preset folder: import, open, change.
+</td>
+</tr>
+</table>
 
-**Undo / redo**: Ctrl+Z / Ctrl+Y (Cmd on macOS) or the arrows in the header. Each knob drag, preset load, dice roll,
-import or reorder is one step (up to 100); host automation doesn't create steps.
+## Modulation
 
-**Menu**: Auto Level and Clip Guard; oversampling for playback (1x/2x/4x/8x) and for rendering (same, or 8x);
-interface size (80-150%, true zoom) and tooltips; what the dice may change (chain order, modulation); the preset
-folder (import, open, change, default, delete); version/sample rate/latency. Interface settings are shared by all
-Hollow windows on the machine. Bypass, Auto Level, Clip Guard and oversampling are settings that presets and the
-dice leave alone.
+![Wavefolder Bass: LFO 1 morphing between two wavefolders](docs/images/wavefolder.jpg)
 
-**Oversampling**: 1x skips it (the distortion aliases: harder, metallic), 8x is the cleanest. The latency is the same
-at every setting (68 samples, the 8x round trip; lower factors are padded), so switching, or rendering at 8x, never
-shifts the audio or disturbs the host's delay compensation.
+LFO 1 and 2 (sine, triangle, ramps, square, sample and hold, smooth random; free or synced and phase-locked to the
+song), an envelope follower and two macro knobs feed an 8-slot matrix with about 40 destinations. Right-click any knob
+and choose *Modulate with...*. Modulated knobs show an orange ring, and the displays follow: here LFO 1 sweeps the
+morph between two wavefolders, and the transfer curve and the morph pad move with it.
 
-The sample rate comes from the host (`prepareToPlay`) whenever it changes, and everything is rebuilt for it
-immediately; nothing needs to poll.
+## Presets, dice and undo
 
-**Auto Level** (on by default) keeps every patch, preset or dice roll, at roughly the loudness of what goes in. It never
-listens to the audio: each module estimates from its settings how it changes a typical music signal (the median
-spectrum of 7,992 released tracks, at about -18 LUFS), a 1/3-octave spectrum is passed through the chain in order
-(filters, tone controls, the echo loop and the loaded impulse shape it band by band; distortion keeps a measured
-share of its input and moves the rest into harmonics; the steady part of the modulation counts), and the result is
-compensated at the output. It is known before anything plays, and it's recomputed only when a setting changes.
-So the **Input** knob is pure drive (more grit, same loudness), and **Output** is a trim on top.
+- **27 factory presets** in five groups (Drive, Lo-Fi, Motion, Space, Chaos), several with unusual chain orders.
+- **Save** your own: they're small `.hollowpreset` files in `Documents/Hollow/Presets` (the folder can be changed).
+  **Import** them from anywhere, or drop them onto the window; nothing is ever overwritten.
+- **Randomize** rolls a new chain: which modules are on, their order, algorithms and modulation routes, within ranges
+  that stay musical. The menu decides whether it may shuffle the order or touch your modulation.
+- **Undo / redo**: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on a Mac) or the arrows in the header. A knob drag, a preset,
+  a dice roll or a reorder is one step each.
 
-On 480 renders of real songs through random patches (`tools/EvalLevel.cpp`), without Auto Level the median patch is
-6.6 dB off the input loudness (90th percentile 18.9 dB); with it the median error is 1.5 dB and 94% land within 6 dB.
-The rest are mostly very narrow resonances whose loudness depends on what a particular song has at that frequency.
-Because it's a guess from settings, much hotter or quieter input than -18 LUFS lands a few dB off in the direction of
-the distortion's compression.
+## Level and quality
 
-**Clip Guard** (on by default) is a soft ceiling at the very end: untouched below -3 dBFS, never above -0.3 dBFS.
-Push the Output knob into it if you want output clipping.
+- **Auto Level** (on by default) keeps every patch near the loudness of your input. It never listens: each module
+  estimates from its settings what it does to typical music, so the gain is known before anything plays. The Input
+  knob becomes pure drive: more grit, same loudness. On real songs through random patches, the median error is 1.5 dB.
+- **Clip Guard** (on by default) is a soft ceiling at the very end: untouched below -3 dBFS, never above -0.3 dBFS.
+- **Oversampling**: 1x lets the distortion alias for a harder, metallic grit; 8x is the cleanest. The latency stays at
+  68 samples (1.4 ms at 48 kHz) at every setting, so switching, or rendering at 8x, never shifts your audio.
 
-Latency is constant (68 samples, ~1.4 ms at 48 kHz) whether or not modules are enabled and whatever the oversampling,
-and it is reported to the host.
-Global mix and bypass are latency-aligned.
+The details, and how they were measured, are in [How it works](docs/how-it-works.md).
 
-## Install (Windows)
+## Install
 
-Copy the whole `Hollow.vst3` folder to `C:\Program Files\Common Files\VST3\` (needs admin), or add the folder containing
-it to your DAW's VST3 search paths, then rescan plugins. `Hollow.exe` is a standalone version for quick tests.
+**Windows**: copy the whole `Hollow.vst3` folder to `C:\Program Files\Common Files\VST3\` and rescan plugins in your
+DAW. `Hollow.exe` is a standalone version. Windows 10 or 11, 64-bit.
 
-## Building
-
-Everything is cross-compiled from Linux/WSL, with the same toolchain as Supervisor (no Visual Studio needed).
+**macOS**: `scripts/build-mac.sh` builds and installs the VST3 and the Audio Unit into `~/Library/Audio/Plug-Ins`
+(Apple Silicon and Intel, macOS 11 or newer). Builds from someone else are blocked by Gatekeeper until they're signed
+and notarized; until then, remove the download flag once:
 
 ```bash
-scripts/setup-toolchain.sh   # once: CMake, Ninja, LLVM (clang-cl), MSVC CRT + Windows SDK via xwin, JUCE, pluginval
-scripts/test-dsp.sh          # native unit tests of the DSP core (g++, no JUCE)
-scripts/build-windows.sh     # -> dist/Hollow.vst3, dist/Hollow.exe, dist/HollowSnapshot.exe
-scripts/test-windows.sh      # harness + pluginval on Windows via WSL interop, screenshots to build/screenshots
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/Hollow.component ~/Library/Audio/Plug-Ins/VST3/Hollow.vst3
 ```
 
-`HollowSnapshot.exe <dir> --renders` also writes a 6-second WAV of the test song through every preset.
+Presets and settings folders are created automatically.
 
-Auto Level accuracy on real music (needs the Free Music Archive `fma_small` set and the list Supervisor's corpus tools
-write):
+## Build from source
+
+**Windows** builds are cross-compiled from Linux or WSL, no Visual Studio needed:
 
 ```bash
-g++ -std=c++20 -O2 -Isource -Itools tools/EvalLevel.cpp -o build/tools/EvalLevel -pthread
-build/tools/EvalLevel ../supervisor/build/tools/fma_list.csv 48 10 -18 --trace   # tracks, patches per track, input LUFS
+scripts/setup-toolchain.sh   # once: CMake, Ninja, LLVM (clang-cl), MSVC runtime + Windows SDK via xwin, JUCE, pluginval
+scripts/build-windows.sh     # -> dist/Hollow.vst3, dist/Hollow.exe
 ```
 
-## macOS
-
-Build on a Mac (Apple's toolchain can't legally or practically be used from Linux/Windows):
+**macOS** builds happen on a Mac:
 
 ```bash
-xcode-select --install && brew install cmake   # once
-scripts/build-mac.sh                           # universal VST3 + AU + app -> dist/mac, installed to ~/Library/Audio/Plug-Ins
+xcode-select --install && brew install cmake   # once (any CMake 3.25+)
+bash scripts/build-mac.sh                      # universal; ARCHS=arm64 for Apple Silicon only
 ```
 
-The build is universal (Apple Silicon and Intel, macOS 11+), ad-hoc signed so it runs on the Mac that built it, and the
-AU is checked with `auval`. To give it to other Macs it has to be signed with a Developer ID certificate (Apple
-Developer Program) and notarized; otherwise Gatekeeper blocks it, and the only way around is removing the quarantine
-flag (`xattr -dr com.apple.quarantine Hollow.component`). Without a Mac, a GitHub Actions macOS runner can run the
-same script.
+**Tests**:
 
-## Layout
+```bash
+scripts/test-dsp.sh          # DSP unit tests (native, no JUCE)
+scripts/test-windows.sh      # render/automation/preset/undo harness + pluginval (strictness 10), and screenshots
+```
+
+## Project layout
 
 ```
-source/dsp/     JUCE-free DSP core: shapers, trash, filters, motion, degrade, impulses + convolver, dynamics, echo,
-                modulation, chain
-source/plugin/  AudioProcessor, parameters, presets, editor
-source/gui/     look & feel (Supervisor's), chain strip, module panels, modulation strip, meters
-tests/          DSP unit tests (shaper bounds, auto gain, oversampled latency, filter curves vs. audio, frequency
-                shifter image rejection, convolution vs. direct convolution, runaway echo bounds, chain latency...)
-tools/          HollowSnapshot: headless preset renders, sample rates, automation stress, dice, state, bypass, screenshots;
-                EvalLevel: Auto Level estimate vs. measured loudness on real songs
-resources/      fonts: Oxanium (interface) and Martian Mono (readouts), SIL Open Font License 1.1
+source/dsp/     JUCE-free DSP: distortion, filters, convolution, motion, degrade, dynamics, echo, modulation,
+                loudness estimate, chain
+source/plugin/  processor, parameters, presets, settings, editor
+source/gui/     look and feel, chain strip, module panels, modulation strip, meters, menu
+tests/          DSP unit tests
+tools/          HollowSnapshot (headless harness and screenshots), EvalLevel (Auto Level on real songs)
+resources/      fonts (Oxanium, Martian Mono; SIL Open Font License)
+docs/           how it works, images
 ```
 
 ## Ideas for later
 
-- User preset saving/browsing, and A/B compare
-- Custom drawable waveshaper and loading your own impulse responses
-- More modulators (step sequencer, MIDI note/velocity), per-band modulation targets
-- Parallel routing (split the chain into two lanes)
+- A/B compare
+- A drawable waveshaper, and loading your own impulse responses
+- More modulators (step sequencer, MIDI), per-band modulation targets
+- Parallel routing: split the chain into two lanes
 
-## Licensing
+## License
 
-Hollow is free software under the **GNU Affero General Public License v3** ([LICENSE](LICENSE)): use it, study it,
-change it and share it, as long as what you share stays under the same licence and comes with its source code (a link
-to this repository does that). Third-party credits and trademarks are listed in [NOTICES.md](NOTICES.md).
-
-It's built on JUCE 9, used under JUCE's AGPLv3 option; a closed-source or commercial release would need a commercial
-JUCE licence instead. The embedded fonts are under the SIL Open Font License 1.1 (`resources/fonts/OFL-*.txt`); keep
-those texts with any distribution. The plugin/manufacturer codes in `CMakeLists.txt` (`Lhei` / `Hlw1`) identify the
-plugin to hosts; change them only together with a new plugin name.
+Hollow is free software under the [GNU Affero General Public License v3](LICENSE): use it, study it, change it and
+share it, as long as what you share stays under the same licence and comes with its source code (a link to this
+repository does that). It's built on [JUCE](https://juce.com) under JUCE's AGPLv3 option. Credits for the fonts and
+other third-party parts, and trademarks, are in [NOTICES.md](NOTICES.md).
