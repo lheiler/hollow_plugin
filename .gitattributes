@@ -1,0 +1,3 @@
+# Keep line endings stable across Windows, Linux and macOS (bash scripts break with CRLF)
+* text=auto eol=lf
+*.ttf binary

@@ -1,0 +1,4 @@
+build/
+dist/
+build-win.log
+.DS_Store
