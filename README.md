@@ -137,7 +137,11 @@ resources/      fonts: Oxanium (interface) and Martian Mono (readouts), SIL Open
 
 ## Licensing
 
-JUCE 9 is dual-licensed (AGPLv3 or commercial JUCE licence). Distributing closed-source binaries requires a JUCE
-licence. The embedded fonts are under the SIL Open Font License 1.1 (`resources/fonts/OFL-*.txt`), which allows
-bundling them in commercial software; keep the licence texts with any distribution. The plugin/manufacturer codes and company name in `CMakeLists.txt` (`Lhei` / `Hlw1`, "lheiler") are
-placeholders.
+Hollow is free software under the **GNU Affero General Public License v3** ([LICENSE](LICENSE)): use it, study it,
+change it and share it, as long as what you share stays under the same licence and comes with its source code (a link
+to this repository does that). Third-party credits and trademarks are listed in [NOTICES.md](NOTICES.md).
+
+It's built on JUCE 9, used under JUCE's AGPLv3 option; a closed-source or commercial release would need a commercial
+JUCE licence instead. The embedded fonts are under the SIL Open Font License 1.1 (`resources/fonts/OFL-*.txt`); keep
+those texts with any distribution. The plugin/manufacturer codes in `CMakeLists.txt` (`Lhei` / `Hlw1`) identify the
+plugin to hosts; change them only together with a new plugin name.
