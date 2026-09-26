@@ -32,6 +32,16 @@ public:
 
     static juce::File getDefaultPresetFolder();
 
+    /** Which factory presets Hollow has already put into a preset folder, so the ones you delete stay deleted.
+        `knowsPresetFolder` is false until Hollow has set a folder up once. */
+    bool knowsPresetFolder (const juce::File& folder) const;
+    juce::StringArray getFactoryPresetsIn (const juce::File& folder) const;
+    void setFactoryPresetsIn (const juce::File& folder, const juce::StringArray& names);
+
+   #ifdef HOLLOW_SNAPSHOT_TOOL
+    void clearAll() { file->clear(); file->saveIfNeeded(); }
+   #endif
+
 private:
     bool getBool (const juce::String& key, bool fallback) const;
     void setBool (const juce::String& key, bool value);

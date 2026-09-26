@@ -1,6 +1,8 @@
 // Headless test harness: renders audio through the real processor, checks invariants and writes
 // editor screenshots. Usage: HollowSnapshot [outputDirectory] [--renders]
+//                            HollowSnapshot --write-pack <folder>   (checks and writes the preset pack)
 
+#include "PresetPack.h"
 #include "plugin/PluginEditor.h"
 #include "plugin/Presets.h"
 
@@ -541,6 +543,7 @@ void testUserPresets (const File& outDir)
     check (mismatches == 0, "all sound parameters restored (" + String (mismatches) + " mismatches)");
     check (b.getModuleOrder() == hl::dsp::ModuleOrder { 7, 6, 5, 4, 3, 2, 1, 0 }, "chain order restored");
     check (b.getPresetName() == "My Test Patch" && b.getCurrentUserPreset() == file, "name and file shown");
+    check (HollowAudioProcessor::getPresetCategory (file).isEmpty(), "a saved preset has no category");
     check (b.getState().getRawParameterValue (pid::clipGuard)->load() < 0.5f, "loading a preset keeps the global Clip Guard setting");
 
     // Import: from elsewhere, never overwriting, identical copies skipped, junk rejected
@@ -562,6 +565,125 @@ void testUserPresets (const File& outDir)
     check (b.deleteUserPreset (file) && b.getUserPresets().size() == 1, "deletes");
     folder.deleteRecursively();
     elsewhere.deleteRecursively();
+}
+
+void testPresetLibrary (const File& outDir)
+{
+    std::cout << "\n[preset library: folders, factory presets, arranging]" << std::endl;
+    using hl::PresetLibrary;
+    const auto folder = outDir.getChildFile ("library");
+    const auto elsewhere = outDir.getChildFile ("library-import");
+    const auto old = outDir.getChildFile ("library-old");
+
+    for (const auto& f : { folder, elsewhere, old })
+        f.deleteRecursively();
+
+    const auto sameSound = [] (HollowAudioProcessor& a, HollowAudioProcessor& b)
+    {
+        int mismatches = a.getModuleOrder() == b.getModuleOrder() ? 0 : 1;
+
+        for (auto* p : a.getParameters())
+            if (auto* rp = dynamic_cast<RangedAudioParameter*> (p))
+                if (! HollowAudioProcessor::isGlobalSetting (rp->paramID)
+                    && std::abs (rp->getValue() - b.getState().getParameter (rp->paramID)->getValue()) > 1.0e-5f)
+                    ++mismatches;
+
+        return mismatches == 0;
+    };
+
+    // The factory presets become files in their category folders
+    HollowAudioProcessor proc;
+    proc.setUserPresetFolder (folder);
+    proc.preparePresetLibrary();
+    const auto library = proc.getPresetLibrary();
+    const auto& factory = hl::presets::all();
+    check (library.scan().size() == (int) factory.size() - 1, String (library.scan().size()) + " factory presets written as files (all but Init)");
+    check (library.getFolders() == StringArray { "Chaos", "Drive", "Lo-Fi", "Motion", "Space" },
+           "in their category folders (" + library.getFolders().joinIntoString (", ") + ")");
+
+    int identical = 0;
+
+    for (size_t i = 1; i < factory.size(); ++i)
+    {
+        HollowAudioProcessor builtIn, fromFile;
+        builtIn.loadPreset ((int) i);
+        const auto file = library.getFolder (factory[i].category).getChildFile (String (factory[i].name) + PresetLibrary::extension);
+        identical += fromFile.loadUserPreset (file) && sameSound (builtIn, fromFile) ? 1 : 0;
+    }
+
+    check (identical == (int) factory.size() - 1, "each factory file sounds exactly like the built-in preset");
+    check (proc.installFactoryPresets (false) == 0 && library.scan().size() == (int) factory.size() - 1, "setting up again adds nothing");
+
+    const auto fuzz = library.getFolder ("Drive").getChildFile ("Fuzz Wall.hollowpreset");
+    check (proc.deleteUserPreset (fuzz) && ! fuzz.exists(), "a factory preset can be deleted");
+    proc.preparePresetLibrary();
+    check (! fuzz.exists(), "and stays deleted");
+    check (proc.installFactoryPresets (true) == 1 && fuzz.existsAsFile(), "Restore factory brings it back");
+
+    // Saving into a folder, and the menu order
+    set (proc.getState(), pid::trash (0, "Drive"), 33.0f);
+    const auto mine = proc.saveUserPreset ("Mine", "Favourites");
+    check (mine == library.getFolder ("Favourites").getChildFile ("Mine.hollowpreset") && HollowAudioProcessor::getPresetCategory (mine) == "Favourites",
+           "saves into a folder (and names it as the category)");
+    const auto loose = proc.saveUserPreset ("Loose One");
+    const auto entries = library.scan();
+    check (entries[0].file == loose && entries[1].folder == "Chaos" && entries.getLast().folder == "Space",
+           "menu order: loose presets first, then the folders A-Z");
+
+    // Moving and renaming keep the loaded preset pointing at its file
+    proc.loadUserPreset (mine);
+    const auto moved = proc.movePreset (mine, "Drive");
+    check (moved == library.getFolder ("Drive").getChildFile ("Mine.hollowpreset") && ! mine.exists() && proc.getCurrentUserPreset() == moved,
+           "moves into another folder, the loaded preset follows");
+    const auto renamed = proc.renamePreset (moved, "Mine: Renamed");
+    HollowAudioProcessor reloaded;
+    check (renamed.getFileName() == "Mine Renamed.hollowpreset" && proc.getCurrentUserPreset() == renamed && proc.getPresetName() == "Mine: Renamed"
+               && reloaded.loadUserPreset (renamed) && reloaded.getPresetName() == "Mine: Renamed" && sameSound (proc, reloaded),
+           "rename changes the file and the name inside, not the sound");
+    check (proc.renamePreset (renamed, "mine renamed").getFileName() == "mine renamed.hollowpreset", "renaming only the case works");
+
+    proc.saveUserPreset ("Clash", "Drive");
+    check (proc.movePreset (proc.saveUserPreset ("Clash"), "Drive").getFileName() == "Clash (2).hollowpreset", "moving onto an existing name keeps both");
+    check (proc.movePreset (library.getFolder ("Drive").getChildFile ("Clash.hollowpreset"), "Drive").getFileName() == "Clash.hollowpreset",
+           "moving into its own folder changes nothing");
+
+    // Folders
+    check (library.createFolder ("Keepers") && ! library.createFolder ("keepers ") && ! library.createFolder ("..."), "new folders (not twice, not unnamed)");
+    proc.loadUserPreset (library.getFolder ("Drive").getChildFile ("mine renamed.hollowpreset"));
+    check (proc.renamePresetFolder ("Drive", "Dirt") && proc.getCurrentUserPreset() == library.getFolder ("Dirt").getChildFile ("mine renamed.hollowpreset"),
+           "renaming a folder, the loaded preset follows");
+    check (! proc.renamePresetFolder ("Dirt", "Chaos") && library.getFolder ("Dirt").isDirectory(), "folders are never merged");
+    check (proc.deletePresetFolder ("Dirt") && ! library.getFolder ("Dirt").exists() && proc.getCurrentUserPreset() == File(),
+           "deleting a folder takes its presets");
+
+    // Import: into the category's folder, never twice
+    HollowAudioProcessor friendOf;
+    friendOf.setUserPresetFolder (elsewhere);
+    friendOf.loadPreset (presetIndex ("Gong Bath"));
+    const auto shared = friendOf.saveUserPreset ("Bells", "Texture");
+    const int before = library.scan().size();
+    const auto imported = proc.importPresets ({ shared });
+    check (imported.size() == 1 && imported[0] == library.getFolder ("Texture").getChildFile ("Bells.hollowpreset"), "import goes into the preset's category folder");
+    const auto kept = proc.movePreset (imported[0], "Keepers");
+    check (proc.importPresets ({ shared }).getFirst() == kept && library.scan().size() == before + 1,
+           "an identical preset isn't imported again, wherever it was moved");
+
+    // Presets imported flat by the version before folders: sorted once, the first time
+    old.createDirectory();
+    shared.copyFileTo (old.getChildFile ("Bells.hollowpreset"));
+    HollowAudioProcessor legacy;
+    legacy.setUserPresetFolder (old);
+    legacy.preparePresetLibrary();
+    check (old.getChildFile ("Texture").getChildFile ("Bells.hollowpreset").existsAsFile() && ! old.getChildFile ("Bells.hollowpreset").exists(),
+           "older flat imports are sorted into their folders");
+    legacy.movePreset (old.getChildFile ("Texture").getChildFile ("Bells.hollowpreset"), {});
+    legacy.preparePresetLibrary();
+    check (old.getChildFile ("Bells.hollowpreset").existsAsFile(), "only once: moving one back out sticks");
+
+    check (PresetLibrary::cleanName (" .My: Preset?. ") == "My Preset" && PresetLibrary::cleanName ("...").isEmpty(), "names are made safe for files");
+
+    for (const auto& f : { folder, elsewhere, old })
+        f.deleteRecursively();
 }
 
 void testUndo()
@@ -744,12 +866,28 @@ void writeScreenshots (const File& outDir)
         saveSnapshot (*editor, outDir.getChildFile (shot.file));
     }
 
-    // The menu page and the save prompt
+    // The menu page, the save prompt and the browser, over a library with the factory presets and the pack
+    const auto library = outDir.getChildFile ("shot-library");
+    library.deleteRecursively();
+
+    {
+        HollowAudioProcessor writer;
+        writer.setUserPresetFolder (library);
+
+        for (const auto& preset : hl::presets::pack())
+        {
+            writer.applyPreset (preset);
+            writer.saveUserPreset (preset.name, preset.category);
+        }
+    }
+
     HollowAudioProcessor proc;
+    proc.setUserPresetFolder (library);
     proc.loadPreset (presetIndex ("Shoegaze Wall"));
     prepare (proc, rate);
     proc.waitForImpulse (5000);
     std::unique_ptr<AudioProcessorEditor> holder (proc.createEditorAndMakeActive());
+    proc.loadUserPreset (library.getChildFile ("Chaos").getChildFile ("Shoegaze Wall.hollowpreset"));
 
     if (auto* editor = dynamic_cast<hl::HollowAudioProcessorEditor*> (holder.get()))
     {
@@ -771,16 +909,112 @@ void writeScreenshots (const File& outDir)
         editor->showMenu (false);
         editor->showSaveDialog();
         saveSnapshot (*editor, outDir.getChildFile ("10-save.png"));
+        editor->showBrowser (true);
+        editor->tick();
+        saveSnapshot (*editor, outDir.getChildFile ("11-browser.png"));
     }
+
+    library.deleteRecursively();
+}
+//==============================================================================
+/** Renders every pack preset (music-spectrum noise, then both macros up, then the test song), writes it
+    as a .hollowpreset with its category and checks that the file loads back to the same sound. */
+void writePack (const File& folder)
+{
+    const auto& list = hl::presets::pack();
+    std::cout << "\n[preset pack: " << list.size() << " presets -> " << folder.getFullPathName() << "]" << std::endl;
+    folder.createDirectory();
+
+    folder.deleteRecursively();
+    folder.createDirectory();
+
+    const double rate = 48000.0;
+    StringArray names, categories;
+    int clean = 0, restored = 0, audible = 0;
+    float worstPeak = 0.0f;
+    double worstLevel = 0.0, worstMacro = 0.0, worstCpu = 0.0;
+    String worstLevelName, worstMacroName, worstCpuName;
+
+    for (const auto& preset : hl::presets::all())
+        names.add (preset.name);
+
+    for (const auto& preset : list)
+    {
+        check (! names.contains (preset.name), String (preset.name) + ": unique name");
+        names.add (preset.name);
+        categories.addIfNotAlreadyThere (preset.category);
+
+        HollowAudioProcessor proc;
+        proc.setUserPresetFolder (folder);
+        proc.applyPreset (preset);
+        const auto file = proc.saveUserPreset (preset.name, preset.category);
+        prepare (proc, rate);
+        proc.waitForImpulse (5000);
+
+        MusicNoise noise (rate);
+        const auto stats = render (proc, noise, rate, 6.0, 2);
+
+        set (proc.getState(), pid::macro (0), 100.0f);
+        set (proc.getState(), pid::macro (1), 100.0f);
+        MusicNoise noise2 (rate);
+        const auto macros = render (proc, noise2, rate, 5.0, 2);
+
+        set (proc.getState(), pid::macro (0), 0.0f);
+        set (proc.getState(), pid::macro (1), 0.0f);
+        TestSong song (rate);
+        const auto songStats = render (proc, song, rate, 5.0, 2);
+
+        const bool finite = stats.finite && macros.finite && songStats.finite;
+        clean += finite ? 1 : 0;
+        audible += songStats.loudnessDiff > -20.0 ? 1 : 0;
+        worstPeak = jmax (worstPeak, stats.peak, macros.peak, songStats.peak);
+        const double cpu = 100.0 * stats.cpuSeconds / stats.seconds;
+
+        if (std::abs (stats.loudnessDiff) > std::abs (worstLevel)) { worstLevel = stats.loudnessDiff; worstLevelName = preset.name; }
+        if (std::abs (macros.loudnessDiff) > std::abs (worstMacro)) { worstMacro = macros.loudnessDiff; worstMacroName = preset.name; }
+        if (cpu > worstCpu) { worstCpu = cpu; worstCpuName = preset.name; }
+
+        // The file must load back to exactly what was applied
+        HollowAudioProcessor applied, loaded;
+        applied.applyPreset (preset);
+        int mismatches = loaded.loadUserPreset (file) ? 0 : 1;
+
+        for (auto* p : applied.getParameters())
+            if (auto* rp = dynamic_cast<RangedAudioParameter*> (p))
+                if (std::abs (rp->getValue() - loaded.getState().getParameter (rp->paramID)->getValue()) > 1.0e-5f)
+                    ++mismatches;
+
+        const bool ok = mismatches == 0 && loaded.getModuleOrder() == applied.getModuleOrder()
+                        && loaded.getPresetName() == preset.name && HollowAudioProcessor::getPresetCategory (file) == preset.category;
+        restored += ok ? 1 : 0;
+
+        std::cout << "        " << String (preset.category).paddedRight (' ', 8) << String (preset.name).paddedRight (' ', 22)
+                  << " noise " << String (stats.loudnessDiff, 1).paddedLeft (' ', 5) << " LU   macros up " << String (macros.loudnessDiff, 1).paddedLeft (' ', 5)
+                  << " LU   song " << String (songStats.loudnessDiff, 1).paddedLeft (' ', 5) << " LU   peak "
+                  << String (Decibels::gainToDecibels (jmax (stats.peak, macros.peak, songStats.peak)), 1).paddedLeft (' ', 5) << " dBFS   cpu "
+                  << String (cpu, 2) << "%" << (ok ? "" : "   NOT RESTORED") << std::endl;
+    }
+
+    const int n = (int) list.size();
+    check (folder.findChildFiles (File::findFiles, true, String ("*") + HollowAudioProcessor::presetExtension).size() == n,
+           String (n) + " files written in " + String (categories.size()) + " categories (" + categories.joinIntoString (", ") + ")");
+    check (clean == n, String (clean) + "/" + String (n) + " render finite audio (also with both macros up)");
+    check (restored == n, String (restored) + "/" + String (n) + " load back to the same parameters, order, name and category");
+    check (audible == n, String (audible) + "/" + String (n) + " pass the test song through audibly");
+    check (worstPeak <= hl::dsp::ClipGuard::ceiling, "no preset peaks above -0.3 dBFS (worst " + String (Decibels::gainToDecibels (worstPeak), 2) + " dBFS)");
+    check (std::abs (worstLevel) < 4.0, "every preset comes out within 4 LU of the input (worst " + String (worstLevel, 1) + " LU, " + worstLevelName + ")");
+    check (std::abs (worstMacro) < 6.0, "and within 6 LU with both macros up (worst " + String (worstMacro, 1) + " LU, " + worstMacroName + ")");
+    std::cout << "        heaviest preset: " << worstCpuName << " at " << String (worstCpu, 2) << "% of one core" << std::endl;
 }
 } // namespace
 
 int main (int argc, char* argv[])
 {
     ScopedJuceInitialiser_GUI juce;
+    SharedResourcePointer<hl::Settings>()->clearAll(); // the harness has its own settings file; start clean
 
     File outDir = File::getCurrentWorkingDirectory().getChildFile ("snapshots");
-    bool renders = false, calibrate = false;
+    bool renders = false, calibrate = false, pack = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -790,8 +1024,17 @@ int main (int argc, char* argv[])
             renders = true;
         else if (arg == "--calibrate")
             calibrate = true;
+        else if (arg == "--write-pack")
+            pack = true;
         else
             outDir = File (arg);
+    }
+
+    if (pack)
+    {
+        writePack (outDir);
+        std::cout << "\n" << (failures == 0 ? "ALL PASSED" : String (failures) + " FAILURE(S)") << std::endl;
+        return failures == 0 ? 0 : 1;
     }
 
     outDir.createDirectory();
@@ -807,6 +1050,7 @@ int main (int argc, char* argv[])
     testHotInput();
     testStateRoundTrip();
     testUserPresets (outDir);
+    testPresetLibrary (outDir);
     testOversampling();
     testUndo();
     testBypassAndMono();

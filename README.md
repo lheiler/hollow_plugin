@@ -27,7 +27,8 @@ modulate almost anything, and let the dice come up with combinations you wouldn'
 - **20 synthesised impulses**: speaker cabinets, telephone, tin can, gong, spring tank, cistern. Because they're
   modelled, *Size* really rescales the object
 - **Tape and vinyl damage** with a glitch engine that stutters, reverses and half-speeds slices in time with your song
-- **Presets and dice**: 27 factory presets, save and import your own, randomize with rules
+- **Presets and dice**: 27 factory presets plus a pack of 100 more, a browser to arrange them in folders, save and
+  import your own, randomize with rules
 - **Auto Level**: every patch comes out at the loudness of what goes in, worked out from the settings, so it's right
   before anything plays
 - **Oversampling from 1x to 8x** at constant latency; render at 8x while playing at less
@@ -98,9 +99,21 @@ morph between two wavefolders, and the transfer curve and the morph pad move wit
 
 ## Presets, dice and undo
 
+![The preset browser](docs/images/browser.jpg)
+
 - **27 factory presets** in five groups (Drive, Lo-Fi, Motion, Space, Chaos), several with unusual chain orders.
-- **Save** your own: they're small `.hollowpreset` files in `Documents/Hollow/Presets` (the folder can be changed).
-  **Import** them from anywhere, or drop them onto the window; nothing is ever overwritten.
+- **The preset pack**: [100 more](presets) in ten categories (Drive, Bass, Drums, Vocal, Lo-Fi, Motion, Rhythm, Space,
+  Texture, Chaos). Almost all have both macros set up: Macro 1 usually adds intensity, Macro 2 changes the character.
+  Drag the `presets` folder onto Hollow's window, or use *Import...* in the browser; each preset lands in its
+  category's folder.
+- **Folders**: every preset, the factory ones included, is a small `.hollowpreset` file in `Documents/Hollow/Presets`
+  (the location can be changed), sorted into folders. Each folder is a submenu of the preset list.
+- **Browse** shows them all by folder, with search. Click to load, double-click to load and close, drag a preset onto a
+  folder to move it, right-click to rename, move, delete or show it in Explorer / Finder. Deleted presets and folders go
+  to the Recycle Bin / Trash, and *Restore factory* puts back any factory preset you removed. The folders are real
+  folders, so arranging them in Explorer or Finder works just as well.
+- **Save** asks for a name and a folder. **Import** from anywhere, or drop files or whole folders onto the window;
+  nothing is ever overwritten.
 - **Randomize** rolls a new chain: which modules are on, their order, algorithms and modulation routes, within ranges
   that stay musical. The menu decides whether it may shuffle the order or touch your modulation.
 - **Undo / redo**: Ctrl+Z / Ctrl+Y (Cmd+Z / Cmd+Shift+Z on a Mac) or the arrows in the header. A knob drag, a preset,
@@ -153,6 +166,7 @@ bash scripts/build-mac.sh                      # universal; ARCHS=arm64 for Appl
 ```bash
 scripts/test-dsp.sh          # DSP unit tests (native, no JUCE)
 scripts/test-windows.sh      # render/automation/preset/undo harness + pluginval (strictness 10), and screenshots
+scripts/make-presets.sh      # checks every preset of the pack on the real processor and writes presets/
 ```
 
 ## Project layout
@@ -163,7 +177,9 @@ source/dsp/     JUCE-free DSP: distortion, filters, convolution, motion, degrade
 source/plugin/  processor, parameters, presets, settings, editor
 source/gui/     look and feel, chain strip, module panels, modulation strip, meters, menu
 tests/          DSP unit tests
-tools/          HollowSnapshot (headless harness and screenshots), EvalLevel (Auto Level on real songs)
+tools/          HollowSnapshot (headless harness and screenshots), EvalLevel (Auto Level on real songs),
+                PresetPack.cpp (the preset pack's source)
+presets/        the preset pack: 100 .hollowpreset files in category folders
 resources/      fonts (Oxanium, Martian Mono; SIL Open Font License)
 docs/           how it works, images
 ```

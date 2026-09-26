@@ -3,10 +3,13 @@
 #include "AudioFifo.h"
 #include "ModulationHost.h"
 #include "Parameters.h"
+#include "PresetLibrary.h"
 #include "Settings.h"
 
 namespace hl
 {
+namespace presets { struct Preset; }
+
 namespace detail
 {
     inline void atomicMax (std::atomic<float>& a, float v) noexcept
@@ -93,21 +96,40 @@ public:
 
     /** Factory presets and the dice. Message thread. */
     void loadPreset (int index);
+    void applyPreset (const presets::Preset& preset); // values and order only (no name)
     void randomize();
     juce::String getPresetName() const;
 
-    /** User presets: files in the preset folder (Documents/Hollow/Presets). Message thread. */
+    /** User presets: files in the preset folder (Documents/Hollow/Presets) and its folders. Message thread. */
     juce::File getUserPresetFolder() const;
     void setUserPresetFolder (const juce::File& folder) { userPresetFolder = folder; } // tests
-    juce::Array<juce::File> getUserPresets() const;
-    juce::File saveUserPreset (const juce::String& name);
+    PresetLibrary getPresetLibrary() const { return PresetLibrary (getUserPresetFolder()); }
+    juce::Array<juce::File> getUserPresets() const; // in menu order
+    juce::File saveUserPreset (const juce::String& name, const juce::String& folder = {});
     bool loadUserPreset (const juce::File& file);
-    bool deleteUserPreset (const juce::File& file);
 
-    /** Copies preset files into the preset folder (never overwrites: clashes get a " (2)" suffix,
-        identical copies are skipped). Returns the files now in the folder, in order. */
+    /** Arranging the library; these keep the loaded preset pointing at its file. */
+    juce::File movePreset (const juce::File& file, const juce::String& folder);
+    juce::File renamePreset (const juce::File& file, const juce::String& name);
+    bool deleteUserPreset (const juce::File& file);
+    bool renamePresetFolder (const juce::String& from, const juce::String& to);
+    bool deletePresetFolder (const juce::String& name);
+
+    /** Copies preset files into the library (into their category's folder; never overwrites: clashes get a
+        " (2)" suffix, identical copies are skipped). Returns the files now in the library, in order. */
     juce::Array<juce::File> importPresets (const juce::Array<juce::File>& files, juce::StringArray* problems = nullptr);
     static bool isPresetFile (const juce::File& file);
+
+    /** The category a preset file names (the folder it came from; empty for loose presets). */
+    static juce::String getPresetCategory (const juce::File& file);
+
+    /** Writes the factory presets into the library as files, in their category folders, skipping names that
+        exist. Normally only ones not put there before (deleting one is respected); `restoreDeleted` brings
+        back every missing one. Returns how many were written. */
+    int installFactoryPresets (bool restoreDeleted);
+
+    /** Sets the preset folder up once: factory presets in, old flat imports sorted into their folders. */
+    void preparePresetLibrary();
 
     /** The user preset file currently loaded (empty for factory presets and dice rolls). */
     juce::File getCurrentUserPreset() const;
@@ -202,6 +224,10 @@ private:
     int currentPreset = 0;
     juce::Random dice;
     juce::File userPresetFolder;
+
+    std::unique_ptr<juce::XmlElement> createPresetXml (const juce::String& name, const juce::String& category, const dsp::ModuleOrder& order,
+                                                       const std::function<float (juce::RangedAudioParameter&)>& valueOf);
+    void followPresetFile (const juce::File& from, const juce::File& to);
     juce::SharedResourcePointer<Settings> settings;
     std::unique_ptr<ImpulseWorker> worker;
 

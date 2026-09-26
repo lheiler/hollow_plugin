@@ -84,8 +84,26 @@ in the direction of the distortion's compression; turning the Input knob towards
 ## Presets and undo
 
 Presets are small XML files (`.hollowpreset`) holding every sound parameter and the chain order. Bypass, Auto Level,
-Clip Guard and oversampling are settings, not sound, so presets and the dice leave them alone. Import copies files into
-the preset folder without overwriting (a clash becomes " (2)", an identical file isn't copied twice).
+Clip Guard and oversampling are settings, not sound, so presets and the dice leave them alone.
+
+The preset folder holds presets at the top level and in folders one level down; each folder is a submenu of the preset
+list and a category in the browser, and nothing else keeps track of them, so arranging files in Explorer or Finder is
+the same as arranging them in Hollow. The first time Hollow opens a preset folder it writes the factory presets into it
+(into Chaos, Drive, Lo-Fi, Motion and Space) and remembers which ones, so a factory preset you delete stays deleted
+until *Restore factory*. They also stay built into the plugin, for the host's program list and for Init.
+
+Saving into a folder writes the folder's name into the file as its `category`, and importing puts a preset into the
+folder its category names (the top level if it has none), so presets keep their place when they're shared. Nothing is
+ever overwritten: a clash becomes " (2)", and an identical file already in the library, wherever it was moved, isn't
+copied again. A dropped folder imports every preset inside it. Deleting a preset or a folder moves it to the Recycle Bin
+/ Trash. Presets imported flat by the version before folders are sorted into their category folders once.
+
+The preset pack is written in `tools/PresetPack.cpp` and turned into files by the harness
+(`HollowSnapshot --write-pack`, run by `scripts/make-presets.sh`). Every preset is rendered through the real processor
+before it's written: finite, under the clip guard's ceiling, within 4 LU of the input with Auto Level (within 6 LU with
+both macros turned all the way up), audible on the test song, and each file must load back to exactly the same
+parameters, order, name and category. Where the Auto Level estimate misses a preset by more than a few dB, the preset
+carries a small output trim.
 
 Undo keeps whole snapshots (every parameter, the order, the preset name) and records one after each finished gesture,
 preset, dice roll or reorder. Host automation doesn't create steps.
@@ -96,8 +114,8 @@ preset, dice roll or reorder. Host automation doesn't create steps.
   every factor and aliasing at 1x against 8x, filter curves against the audio, frequency shifter image rejection,
   convolution against direct convolution, runaway echo bounds, dynamics, degrade, chain latency and bypass, and every
   Auto Level estimate against measured loudness.
-- **Plugin harness** (`tools/Snapshot.cpp`, run on Windows by `scripts/test-windows.sh`): every factory preset,
-  40 dice rolls, 44.1 to 192 kHz, parameter automation every block, state save and load, user presets and import,
+- **Plugin harness** (`tools/Snapshot.cpp`, run on Windows by `scripts/test-windows.sh`): every factory preset
+  (and the preset pack, with `--write-pack`), 40 dice rolls, 44.1 to 192 kHz, parameter automation every block, state save and load, user presets and import,
   oversampling and render mode, undo and redo, bypass and mono, and screenshots.
 - **pluginval** at strictness 10.
 - **Auto Level on real music**: `tools/EvalLevel.cpp` (needs the `fma_small` set):

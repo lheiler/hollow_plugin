@@ -33,6 +33,7 @@ public:
     std::function<void (float)> onZoomChanged;
     std::function<void (bool)> onTooltipsChanged;
     std::function<void()> onPresetsChanged;
+    std::function<void()> onBrowse;
     std::function<void()> onClose;
 
     void refresh();
@@ -49,7 +50,7 @@ private:
     ChoiceButtons liveQuality, renderQuality;
     Segmented zoom;
     juce::ToggleButton tooltips { "Tooltips" }, shuffleOrder { "Shuffle order" }, changeModulation { "Modulation" };
-    juce::TextButton importButton { "Import..." }, openFolder { "Open folder" }, deletePreset { "Delete current" },
+    juce::TextButton importButton { "Import..." }, openFolder { "Open folder" }, browseButton { "Browse..." },
                      changeFolder { "Change folder..." }, defaultFolder { "Default" }, closeButton { "Close" };
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String status;
@@ -61,17 +62,19 @@ public:
     void importPresetFiles (const juce::Array<juce::File>& files) { importFiles (files); }
 };
 
-/** "Save preset" prompt shown over the whole editor. */
+/** "Save preset" prompt shown over the whole editor: a name and the folder it goes into. */
 class SavePresetDialog final : public juce::Component
 {
 public:
     SavePresetDialog();
 
-    std::function<void (const juce::String&)> onSave;
+    std::function<void (const juce::String& name, const juce::String& folder)> onSave;
     std::function<void()> onCancel;
 
-    /** Shows the dialog with `name` prefilled; `existing` lists names that would be replaced. */
-    void open (const juce::String& name, juce::StringArray existing);
+    /** Shows the dialog with `name` prefilled and `folder` chosen ("" = top level); `exists` tells whether a
+        preset would be replaced. */
+    void open (const juce::String& name, const juce::StringArray& folders, const juce::String& folder,
+               std::function<bool (const juce::String& folder, const juce::String& name)> exists);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -81,9 +84,13 @@ private:
     void confirm();
     juce::Rectangle<int> card() const;
 
+    juce::String chosenFolder() const;
+
     juce::TextEditor nameEditor;
+    juce::ComboBox folderBox;
     juce::TextButton save { "Save" }, cancel { "Cancel" };
-    juce::StringArray existingNames;
+    juce::StringArray folderNames;
+    std::function<bool (const juce::String&, const juce::String&)> existsCheck;
 };
 
 } // namespace hl::gui

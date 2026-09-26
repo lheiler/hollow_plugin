@@ -16,6 +16,7 @@ set(HOLLOW_SOURCES
     source/plugin/Parameters.cpp
     source/plugin/Presets.cpp
     source/plugin/Settings.cpp
+    source/plugin/PresetLibrary.cpp
     source/plugin/PluginProcessor.cpp
     source/plugin/PluginEditor.cpp
     source/gui/Theme.cpp
@@ -29,7 +30,8 @@ set(HOLLOW_SOURCES
     source/gui/EffectPanels.cpp
     source/gui/ModulationPanel.cpp
     source/gui/MeterPanel.cpp
-    source/gui/SettingsPage.cpp)
+    source/gui/SettingsPage.cpp
+    source/gui/PresetBrowser.cpp)
 
 # Oxanium + Martian Mono (SIL Open Font License 1.1, see resources/fonts/OFL-*.txt)
 juce_add_binary_data(HollowFonts
@@ -93,7 +95,7 @@ target_link_libraries(Hollow
 # Headless tool: instantiates the processor + editor, renders audio and writes editor screenshots.
 if(HOLLOW_BUILD_SNAPSHOT_TOOL)
     juce_add_console_app(HollowSnapshot PRODUCT_NAME "HollowSnapshot")
-    target_sources(HollowSnapshot PRIVATE tools/Snapshot.cpp ${HOLLOW_SOURCES})
+    target_sources(HollowSnapshot PRIVATE tools/Snapshot.cpp tools/PresetPack.cpp ${HOLLOW_SOURCES})
     target_include_directories(HollowSnapshot PRIVATE source)
     target_compile_definitions(HollowSnapshot PRIVATE ${HOLLOW_DEFINITIONS} HOLLOW_SNAPSHOT_TOOL=1)
     target_link_libraries(HollowSnapshot

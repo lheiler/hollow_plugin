@@ -68,7 +68,7 @@ SettingsPage::SettingsPage (PanelContext& c)
       zoom ({ "80%", "90%", "100%", "110%", "125%", "150%" })
 {
     for (auto* comp : std::initializer_list<Component*> { &autoLevel, &clipGuard, &liveQuality, &renderQuality, &zoom, &tooltips,
-                                                          &shuffleOrder, &changeModulation, &importButton, &openFolder, &deletePreset,
+                                                          &shuffleOrder, &changeModulation, &importButton, &openFolder, &browseButton,
                                                           &changeFolder, &defaultFolder, &closeButton })
         addAndMakeVisible (comp);
 
@@ -151,12 +151,10 @@ SettingsPage::SettingsPage (PanelContext& c)
         folder.startAsProcess();
     };
 
-    deletePreset.onClick = [this]
+    browseButton.onClick = [this]
     {
-        if (processor.deleteUserPreset (processor.getCurrentUserPreset()) && onPresetsChanged != nullptr)
-            onPresetsChanged();
-
-        refresh();
+        if (onBrowse != nullptr)
+            onBrowse();
     };
 
     closeButton.onClick = [this]
@@ -189,7 +187,6 @@ void SettingsPage::importFiles (const Array<File>& files)
 
 void SettingsPage::refresh()
 {
-    deletePreset.setEnabled (processor.getCurrentUserPreset().existsAsFile());
     defaultFolder.setEnabled (settings->hasCustomPresetFolder());
     repaint();
 }
@@ -258,9 +255,10 @@ void SettingsPage::paint (Graphics& g)
     // Presets
     {
         auto c = cards[4].reduced (14, 10).withTrimmedTop (22);
-        const int count = processor.getUserPresets().size();
-        drawNote (g, String (count) + (count == 1 ? " saved preset in" : " saved presets in")
-                     + (settings->hasCustomPresetFolder() ? " your folder" : " the default folder"), c.removeFromTop (20));
+        const auto library = processor.getPresetLibrary();
+        const int count = library.scan().size(), folders = library.getFolders().size();
+        drawNote (g, String (count) + (count == 1 ? " preset" : " presets") + " in " + String (folders) + (folders == 1 ? " folder" : " folders")
+                     + (settings->hasCustomPresetFolder() ? ", in your folder" : ", in the default folder"), c.removeFromTop (20));
         g.setColour (colours::text);
         g.setFont (monoFont (11.5f));
         g.drawFittedText (processor.getUserPresetFolder().getFullPathName(), c.removeFromTop (22), Justification::centredLeft, 1, 0.8f);
@@ -271,7 +269,7 @@ void SettingsPage::paint (Graphics& g)
         g.drawFittedText (status.isNotEmpty() ? status
                                               : (current.existsAsFile() ? "Loaded: " + current.getFileNameWithoutExtension()
                                                                         : String ("Save the current sound with SAVE in the header. Import .hollowpreset files "
-                                                                                  "here or drop them onto the plugin window.")),
+                                                                                  "(or whole folders) here or by dropping them onto the plugin window.")),
                           c.removeFromTop (36), Justification::topLeft, 2, 1.0f);
     }
 
@@ -364,7 +362,7 @@ void SettingsPage::resized()
         row.removeFromLeft (8);
         openFolder.setBounds (row.removeFromLeft (140));
         row.removeFromLeft (8);
-        deletePreset.setBounds (row.removeFromLeft (150));
+        browseButton.setBounds (row.removeFromLeft (150));
         c.removeFromTop (8);
         row = c.removeFromTop (30);
         changeFolder.setBounds (row.removeFromLeft (170));
@@ -377,8 +375,11 @@ void SettingsPage::resized()
 SavePresetDialog::SavePresetDialog()
 {
     addAndMakeVisible (nameEditor);
+    addAndMakeVisible (folderBox);
     addAndMakeVisible (save);
     addAndMakeVisible (cancel);
+
+    folderBox.onChange = [this] { repaint(); };
 
     nameEditor.setFont (font (16.0f));
     nameEditor.setIndents (10, 6);
@@ -392,9 +393,18 @@ SavePresetDialog::SavePresetDialog()
     cancel.onClick = [this] { if (onCancel != nullptr) onCancel(); };
 }
 
-void SavePresetDialog::open (const String& name, StringArray existing)
+void SavePresetDialog::open (const String& name, const StringArray& folders, const String& folder,
+                             std::function<bool (const String&, const String&)> exists)
 {
-    existingNames = std::move (existing);
+    folderNames = folders;
+    existsCheck = std::move (exists);
+    folderBox.clear (dontSendNotification);
+    folderBox.addItem ("Top level", 1);
+
+    for (int i = 0; i < folderNames.size(); ++i)
+        folderBox.addItem (folderNames[i], i + 2);
+
+    folderBox.setSelectedId (folderNames.indexOf (folder) + 2, dontSendNotification);
     nameEditor.setText (name, false);
     nameEditor.selectAll();
     setVisible (true);
@@ -408,12 +418,17 @@ void SavePresetDialog::confirm()
     const auto name = nameEditor.getText().trim();
 
     if (name.isNotEmpty() && onSave != nullptr)
-        onSave (name);
+        onSave (name, chosenFolder());
+}
+
+String SavePresetDialog::chosenFolder() const
+{
+    return folderNames[folderBox.getSelectedId() - 2];
 }
 
 Rectangle<int> SavePresetDialog::card() const
 {
-    return getLocalBounds().withSizeKeepingCentre (420, 176);
+    return getLocalBounds().withSizeKeepingCentre (420, 214);
 }
 
 void SavePresetDialog::paint (Graphics& g)
@@ -423,20 +438,25 @@ void SavePresetDialog::paint (Graphics& g)
 
     auto c = drawCard (g, card().toFloat(), "Save preset", colours::ink);
     c.removeFromTop (40);
+    drawLabel (g, "Folder", c.removeFromTop (30).withWidth (60.0f), Justification::centredLeft, colours::textDim, 9.5f);
+    c.removeFromTop (6);
 
-    const auto name = File::createLegalFileName (nameEditor.getText().trim());
-    const bool replaces = existingNames.contains (name, true);
+    const auto name = nameEditor.getText().trim();
+    const auto folder = chosenFolder();
+    const bool replaces = name.isNotEmpty() && existsCheck != nullptr && existsCheck (folder, name);
     g.setColour (replaces ? colours::accent : colours::textDim);
     g.setFont (font (12.0f));
-    g.drawText (replaces ? "A preset with this name exists and will be replaced."
-                         : "Saved to Documents / Hollow / Presets",
-                c.removeFromTop (22).toFloat(), Justification::centredLeft, false);
+    g.drawText (replaces ? "A preset with this name is in this folder and will be replaced."
+                         : (folder.isEmpty() ? String ("Saved at the top of your presets.") : "Saved in the folder " + folder + "."),
+                c.removeFromTop (22), Justification::centredLeft, false);
 }
 
 void SavePresetDialog::resized()
 {
     auto c = card().reduced (12, 8).withTrimmedTop (20);
     nameEditor.setBounds (c.removeFromTop (32));
+    c.removeFromTop (8);
+    folderBox.setBounds (c.removeFromTop (30).withTrimmedLeft (64).withWidth (240));
     c.removeFromTop (30);
     auto row = c.removeFromBottom (30);
     save.setBounds (row.removeFromRight (100));

@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Presets.h"
+#include "PresetLibrary.h"
 
 namespace hl
 {
@@ -387,6 +388,14 @@ void HollowAudioProcessor::loadPreset (int index)
         return;
 
     const auto& preset = list[(size_t) index];
+    applyPreset (preset);
+    currentPreset = index;
+    getUiState().setProperty ("preset", preset.name, nullptr);
+    getUiState().removeProperty ("presetFile", nullptr);
+}
+
+void HollowAudioProcessor::applyPreset (const presets::Preset& preset)
+{
     resetAllParameters();
 
     for (const auto& [paramId, value] : preset.values)
@@ -396,9 +405,6 @@ void HollowAudioProcessor::loadPreset (int index)
     }
 
     setModuleOrder (presets::completeOrder (preset.order));
-    currentPreset = index;
-    getUiState().setProperty ("preset", preset.name, nullptr);
-    getUiState().removeProperty ("presetFile", nullptr);
 }
 
 //==============================================================================
@@ -409,97 +415,46 @@ juce::File HollowAudioProcessor::getUserPresetFolder() const
 
 bool HollowAudioProcessor::isPresetFile (const juce::File& file)
 {
-    if (! file.existsAsFile() || ! file.hasFileExtension (presetExtension) || file.getSize() > 1024 * 1024)
-        return false;
+    return PresetLibrary::isPresetFile (file);
+}
 
-    const auto xml = juce::XmlDocument::parse (file);
-    return xml != nullptr && xml->hasTagName ("HollowPreset");
+juce::String HollowAudioProcessor::getPresetCategory (const juce::File& file)
+{
+    return PresetLibrary::getCategory (file);
 }
 
 juce::Array<juce::File> HollowAudioProcessor::importPresets (const juce::Array<juce::File>& files, juce::StringArray* problems)
 {
-    juce::Array<juce::File> result;
-    const auto folder = getUserPresetFolder();
-
-    if (! folder.createDirectory())
-    {
-        if (problems != nullptr)
-            problems->add ("can't create " + folder.getFullPathName());
-
-        return result;
-    }
-
-    for (const auto& source : files)
-    {
-        if (! isPresetFile (source))
-        {
-            if (problems != nullptr)
-                problems->add (source.getFileName() + " is not a Hollow preset");
-
-            continue;
-        }
-
-        if (source.getParentDirectory() == folder)
-        {
-            result.add (source); // already there
-            continue;
-        }
-
-        // Already imported (under any name)? Then just point at that copy
-        juce::File identical;
-
-        for (const auto& existing : getUserPresets())
-            if (existing.getSize() == source.getSize() && existing.hasIdenticalContentTo (source))
-                identical = existing;
-
-        if (identical != juce::File())
-        {
-            result.add (identical);
-            continue;
-        }
-
-        auto target = folder.getChildFile (source.getFileName());
-
-        for (int n = 2; target.existsAsFile(); ++n)
-            target = folder.getChildFile (source.getFileNameWithoutExtension() + " (" + juce::String (n) + ")" + presetExtension);
-
-        if (source.copyFileTo (target))
-            result.add (target);
-        else if (problems != nullptr)
-            problems->add ("couldn't copy " + source.getFileName());
-    }
-
-    return result;
+    return getPresetLibrary().import (files, problems);
 }
 
 juce::Array<juce::File> HollowAudioProcessor::getUserPresets() const
 {
-    auto files = getUserPresetFolder().findChildFiles (juce::File::findFiles, false, juce::String ("*") + presetExtension);
+    juce::Array<juce::File> files;
 
-    std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b)
-    {
-        return a.getFileNameWithoutExtension().compareNatural (b.getFileNameWithoutExtension()) < 0;
-    });
+    for (const auto& entry : getPresetLibrary().scan())
+        files.add (entry.file);
 
     return files;
 }
 
-juce::File HollowAudioProcessor::saveUserPreset (const juce::String& name)
+std::unique_ptr<juce::XmlElement> HollowAudioProcessor::createPresetXml (const juce::String& name, const juce::String& category,
+                                                                        const dsp::ModuleOrder& order,
+                                                                        const std::function<float (juce::RangedAudioParameter&)>& valueOf)
 {
-    const auto cleanName = juce::File::createLegalFileName (name.trim());
+    auto xml = std::make_unique<juce::XmlElement> ("HollowPreset");
+    xml->setAttribute ("name", name.trim());
+    xml->setAttribute ("version", 1);
 
-    if (cleanName.isEmpty())
-        return {};
+    if (category.isNotEmpty())
+        xml->setAttribute ("category", category);
 
-    const auto folder = getUserPresetFolder();
+    juce::StringArray items;
 
-    if (! folder.createDirectory())
-        return {};
+    for (auto id : order)
+        items.add (juce::String (id));
 
-    juce::XmlElement xml ("HollowPreset");
-    xml.setAttribute ("name", name.trim());
-    xml.setAttribute ("version", 1);
-    xml.setAttribute ("moduleOrder", state.state.getProperty ("moduleOrder").toString());
+    xml->setAttribute ("moduleOrder", items.joinIntoString (","));
 
     for (auto* p : getParameters())
     {
@@ -508,15 +463,30 @@ juce::File HollowAudioProcessor::saveUserPreset (const juce::String& name)
             if (isGlobalSetting (rp->paramID))
                 continue;
 
-            auto* e = xml.createNewChildElement ("PARAM");
+            auto* e = xml->createNewChildElement ("PARAM");
             e->setAttribute ("id", rp->paramID);
-            e->setAttribute ("value", rp->convertFrom0to1 (rp->getValue()));
+            e->setAttribute ("value", valueOf (*rp));
         }
     }
 
-    const auto file = folder.getChildFile (cleanName + presetExtension);
+    return xml;
+}
 
-    if (! xml.writeTo (file))
+juce::File HollowAudioProcessor::saveUserPreset (const juce::String& name, const juce::String& folder)
+{
+    const auto cleanName = PresetLibrary::cleanName (name);
+    const auto cleanFolder = PresetLibrary::cleanName (folder);
+    const auto library = getPresetLibrary();
+
+    if (cleanName.isEmpty() || ! library.getFolder (cleanFolder).createDirectory())
+        return {};
+
+    // The folder travels with the file as its category, so importing it elsewhere puts it in the same place
+    const auto xml = createPresetXml (name, cleanFolder, getModuleOrder(),
+                                      [] (juce::RangedAudioParameter& p) { return p.convertFrom0to1 (p.getValue()); });
+    const auto file = library.getFolder (cleanFolder).getChildFile (cleanName + presetExtension);
+
+    if (! xml->writeTo (file))
         return {};
 
     getUiState().setProperty ("preset", name.trim(), nullptr);
@@ -557,15 +527,138 @@ bool HollowAudioProcessor::loadUserPreset (const juce::File& file)
     return true;
 }
 
+void HollowAudioProcessor::followPresetFile (const juce::File& from, const juce::File& to)
+{
+    const auto current = getCurrentUserPreset();
+
+    if (current == juce::File() || to == juce::File())
+        return;
+
+    // The loaded preset, or the folder it's in, moved: keep pointing at it
+    juce::File now;
+
+    if (current == from)
+        now = to;
+    else if (current.isAChildOf (from))
+        now = to.getChildFile (current.getRelativePathFrom (from));
+
+    if (now != juce::File())
+    {
+        getUiState().setProperty ("presetFile", now.getFullPathName(), nullptr);
+
+        if (now.existsAsFile() && current == from)
+            if (auto xml = juce::XmlDocument::parse (now))
+                getUiState().setProperty ("preset", xml->getStringAttribute ("name", now.getFileNameWithoutExtension()), nullptr);
+    }
+}
+
+juce::File HollowAudioProcessor::movePreset (const juce::File& file, const juce::String& folder)
+{
+    const auto moved = getPresetLibrary().move (file, folder);
+    followPresetFile (file, moved);
+    return moved;
+}
+
+juce::File HollowAudioProcessor::renamePreset (const juce::File& file, const juce::String& name)
+{
+    const auto renamed = getPresetLibrary().rename (file, name);
+    followPresetFile (file, renamed);
+    return renamed;
+}
+
 bool HollowAudioProcessor::deleteUserPreset (const juce::File& file)
 {
-    if (! file.isAChildOf (getUserPresetFolder()) || ! file.hasFileExtension (presetExtension))
+    const bool wasCurrent = getCurrentUserPreset() == file;
+
+    if (! getPresetLibrary().remove (file))
         return false;
 
-    if (getCurrentUserPreset() == file)
+    if (wasCurrent)
         getUiState().removeProperty ("presetFile", nullptr);
 
-    return file.deleteFile();
+    return true;
+}
+
+bool HollowAudioProcessor::renamePresetFolder (const juce::String& from, const juce::String& to)
+{
+    const auto library = getPresetLibrary();
+
+    if (! library.renameFolder (from, to))
+        return false;
+
+    followPresetFile (library.getFolder (from), library.getFolder (PresetLibrary::cleanName (to)));
+    return true;
+}
+
+bool HollowAudioProcessor::deletePresetFolder (const juce::String& name)
+{
+    const auto library = getPresetLibrary();
+    const bool holdsCurrent = getCurrentUserPreset().isAChildOf (library.getFolder (name));
+
+    if (name.isEmpty() || ! library.removeFolder (name))
+        return false;
+
+    if (holdsCurrent)
+        getUiState().removeProperty ("presetFile", nullptr);
+
+    return true;
+}
+
+int HollowAudioProcessor::installFactoryPresets (bool restoreDeleted)
+{
+    const auto library = getPresetLibrary();
+
+    if (! library.getRoot().createDirectory())
+        return 0;
+
+    auto installed = restoreDeleted ? juce::StringArray() : settings->getFactoryPresetsIn (library.getRoot());
+    juce::StringArray present;
+
+    for (const auto& entry : library.scan())
+        present.add (entry.getName());
+
+    int written = 0;
+
+    for (const auto& preset : presets::all())
+    {
+        if (juce::String (preset.category) == "Init" || installed.contains (preset.name))
+            continue;
+
+        // Never next to (or instead of) a preset of the same name
+        if (! present.contains (preset.name, true) && library.getFolder (preset.category).createDirectory())
+        {
+            std::map<juce::String, float> values (preset.values.begin(), preset.values.end());
+            const auto xml = createPresetXml (preset.name, preset.category, presets::completeOrder (preset.order),
+                                              [&values] (juce::RangedAudioParameter& p)
+                                              {
+                                                  const auto it = values.find (p.paramID);
+
+                                                  if (it == values.end())
+                                                      return p.convertFrom0to1 (p.getDefaultValue());
+
+                                                  return p.convertFrom0to1 (p.convertTo0to1 (p.getNormalisableRange().snapToLegalValue (it->second)));
+                                              });
+
+            if (xml->writeTo (library.getFolder (preset.category).getChildFile (PresetLibrary::cleanName (preset.name) + presetExtension)))
+                ++written;
+        }
+
+        installed.add (preset.name);
+    }
+
+    settings->setFactoryPresetsIn (library.getRoot(), installed);
+    return written;
+}
+
+void HollowAudioProcessor::preparePresetLibrary()
+{
+    const auto root = getUserPresetFolder();
+
+    // The first time in a folder: presets imported before folders existed move into their categories
+    if (! settings->knowsPresetFolder (root))
+        getPresetLibrary().sortIntoCategories();
+
+    installFactoryPresets (false);
 }
 
 juce::File HollowAudioProcessor::getCurrentUserPreset() const

@@ -26,6 +26,7 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
       modulationPanel (context),
       meterPanel (context),
       settingsPage (context),
+      browser (p),
       bypassButton (p.getState(), params::id::bypass, "BYPASS", gui::colours::danger)
 {
     setLookAndFeel (&lookAndFeel);
@@ -41,6 +42,7 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
         content.addChildComponent (panelFor (id));
 
     content.addChildComponent (settingsPage);
+    content.addChildComponent (browser);
     content.addChildComponent (saveDialog);
     content.addChildComponent (dropHint);
 
@@ -50,10 +52,11 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
         selectModule (id);
     };
 
-    // Presets: factory list + the user's saved ones
+    // Presets: the files in the preset folder (the factory ones are written there the first time)
+    processor.preparePresetLibrary();
     content.addAndMakeVisible (presetBox);
     rebuildPresetMenu();
-    presetBox.setTooltip ("Factory and saved presets");
+    presetBox.setTooltip ("Presets, by folder");
     presetBox.beforePopup = [this]
     {
         rebuildPresetMenu();
@@ -63,6 +66,14 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
     {
         const int id = presetBox.getSelectedId();
 
+        if (id == browseItemId)
+        {
+            shownPreset = {};
+            syncPresetSelection();
+            showBrowser (true);
+            return;
+        }
+
         if (id > userPresetIdOffset && id - userPresetIdOffset - 1 < userPresetFiles.size())
             processor.loadUserPreset (userPresetFiles[id - userPresetIdOffset - 1]);
         else if (id > 0 && id <= userPresetIdOffset)
@@ -71,7 +82,7 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
         chainStrip.refresh();
     };
 
-    for (auto* b : std::initializer_list<Component*> { &previousPreset, &nextPreset, &saveButton, &diceButton, &menuButton, &undoButton, &redoButton })
+    for (auto* b : std::initializer_list<Component*> { &previousPreset, &nextPreset, &browseButton, &saveButton, &diceButton, &menuButton, &undoButton, &redoButton })
         content.addAndMakeVisible (b);
 
    #if JUCE_MAC
@@ -87,6 +98,8 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
 
     previousPreset.onClick = [this] { stepPreset (-1); };
     nextPreset.onClick = [this] { stepPreset (1); };
+    browseButton.setTooltip ("All presets by folder: load, arrange into folders, rename, delete");
+    browseButton.onClick = [this] { showBrowser (! browser.isVisible()); };
     saveButton.setTooltip ("Save the current sound as a preset");
     saveButton.onClick = [this] { showSaveDialog(); };
     diceButton.setTooltip ("Roll the dice: a random chain, order, algorithms and modulation - a new texture every click");
@@ -101,15 +114,26 @@ HollowAudioProcessorEditor::HollowAudioProcessorEditor (HollowAudioProcessor& p)
 
     settingsPage.onZoomChanged = [this] (float z) { setZoom (z); };
     settingsPage.onTooltipsChanged = [this] (bool on) { tooltips.setMillisecondsBeforeTipAppears (on ? 700 : 1 << 30); };
-    settingsPage.onPresetsChanged = [this] { rebuildPresetMenu(); };
+    settingsPage.onPresetsChanged = [this]
+    {
+        processor.preparePresetLibrary(); // a new preset folder gets the factory presets too
+        rebuildPresetMenu();
+        browser.refresh();
+    };
+    settingsPage.onBrowse = [this] { showBrowser (true); };
+
+    browser.onClose = [this] { showBrowser (false); };
+    browser.onLibraryChanged = [this] { rebuildPresetMenu(); };
+    browser.onPresetLoaded = [this] { chainStrip.refresh(); };
     settingsPage.onClose = [this] { showMenu (false); };
 
     saveDialog.onCancel = [this] { saveDialog.setVisible (false); };
-    saveDialog.onSave = [this] (const String& name)
+    saveDialog.onSave = [this] (const String& name, const String& folder)
     {
-        if (processor.saveUserPreset (name).existsAsFile())
+        if (processor.saveUserPreset (name, folder).existsAsFile())
         {
             rebuildPresetMenu();
+            browser.refresh();
             saveDialog.setVisible (false);
         }
     };
@@ -154,51 +178,70 @@ gui::ModulePanel* HollowAudioProcessorEditor::panelFor (int moduleId)
 
 void HollowAudioProcessorEditor::rebuildPresetMenu()
 {
+    // Init, then the library: loose presets first, one submenu per folder, in the order < and > walk
     presetBox.clear (dontSendNotification);
-    String lastCategory;
-    const auto& list = presets::all();
+    presetBox.addItem ("Init", 1);
+    userPresetFiles.clearQuick();
 
-    for (size_t i = 0; i < list.size(); ++i)
+    const auto entries = processor.getPresetLibrary().scan();
+
+    if (! entries.isEmpty())
+        presetBox.addSeparator();
+
+    for (const auto& entry : entries)
     {
-        if (String (list[i].category) != lastCategory)
+        if (entry.folder.isEmpty())
         {
-            lastCategory = list[i].category;
-            presetBox.addSectionHeading (lastCategory);
+            userPresetFiles.add (entry.file);
+            presetBox.addItem (entry.getName(), userPresetIdOffset + userPresetFiles.size());
+        }
+    }
+
+    for (int i = 0; i < entries.size();)
+    {
+        const auto folder = entries[i].folder;
+
+        if (folder.isEmpty())
+        {
+            ++i;
+            continue;
         }
 
-        presetBox.addItem (list[i].name, (int) i + 1);
+        PopupMenu sub;
+
+        for (; i < entries.size() && entries[i].folder == folder; ++i)
+        {
+            userPresetFiles.add (entries[i].file);
+            sub.addItem (userPresetIdOffset + userPresetFiles.size(), entries[i].getName());
+        }
+
+        presetBox.getRootMenu()->addSubMenu (folder, sub);
     }
 
-    userPresetFiles = processor.getUserPresets();
-
-    if (! userPresetFiles.isEmpty())
-    {
-        presetBox.addSectionHeading ("Saved");
-
-        for (int i = 0; i < userPresetFiles.size(); ++i)
-            presetBox.addItem (userPresetFiles[i].getFileNameWithoutExtension(), userPresetIdOffset + i + 1);
-    }
-
+    presetBox.addSeparator();
+    presetBox.addItem ("Browse presets...", browseItemId);
     shownPreset = {};
 }
 
 void HollowAudioProcessorEditor::stepPreset (int delta)
 {
-    // One list: factory presets, then saved ones
-    const int factory = (int) presets::all().size();
-    const int total = factory + userPresetFiles.size();
-    const int id = presetBox.getSelectedId();
-    int index = id > userPresetIdOffset ? factory + id - userPresetIdOffset - 1 : id - 1;
+    const int total = userPresetFiles.size();
 
-    if (index < 0)
-        index = delta > 0 ? -1 : 0;
-
-    index = (index + delta + total) % total;
-
-    if (index < factory)
-        processor.loadPreset (index);
+    if (total == 0)
+    {
+        // Nothing in the library: walk the built-in list
+        const int n = (int) presets::all().size();
+        processor.loadPreset ((processor.getCurrentProgram() + delta + n) % n);
+    }
     else
-        processor.loadUserPreset (userPresetFiles[index - factory]);
+    {
+        int index = userPresetFiles.indexOf (processor.getCurrentUserPreset());
+
+        if (index < 0)
+            index = delta > 0 ? -1 : 0; // from Init or an unsaved sound: start at either end
+
+        processor.loadUserPreset (userPresetFiles[(index + delta + total) % total]);
+    }
 
     chainStrip.refresh();
 }
@@ -216,6 +259,9 @@ void HollowAudioProcessorEditor::selectModule (int moduleId)
 
 void HollowAudioProcessorEditor::showMenu (bool shouldShow)
 {
+    if (shouldShow)
+        showBrowser (false);
+
     settingsPage.setVisible (shouldShow);
     menuButton.setToggleState (shouldShow, dontSendNotification);
 
@@ -226,15 +272,34 @@ void HollowAudioProcessorEditor::showMenu (bool shouldShow)
     }
 }
 
+void HollowAudioProcessorEditor::showBrowser (bool shouldShow)
+{
+    if (shouldShow)
+    {
+        showMenu (false);
+        browser.refresh();
+        browser.toFront (false);
+    }
+
+    browser.setVisible (shouldShow);
+    browseButton.setToggleState (shouldShow, dontSendNotification);
+}
+
 void HollowAudioProcessorEditor::showSaveDialog()
 {
-    StringArray existing;
-
-    for (const auto& f : processor.getUserPresets())
-        existing.add (f.getFileNameWithoutExtension());
-
+    // Offer the folder of the loaded preset, so saving a tweak lands next to the original
+    const auto library = processor.getPresetLibrary();
     const auto current = processor.getPresetName();
-    saveDialog.open (current.startsWith ("Random #") || current == "Init" ? String ("My Texture") : current, existing);
+    const auto currentFile = processor.getCurrentUserPreset();
+    const auto folder = currentFile.isAChildOf (library.getRoot()) ? library.folderOf (currentFile) : String();
+
+    saveDialog.open (current.startsWith ("Random #") || current == "Init" ? String ("My Texture") : current,
+                     library.getFolders(), folder,
+                     [library] (const String& f, const String& name)
+                     {
+                         return library.getFolder (PresetLibrary::cleanName (f))
+                                       .getChildFile (PresetLibrary::cleanName (name) + PresetLibrary::extension).existsAsFile();
+                     });
 }
 
 void HollowAudioProcessorEditor::setZoom (float newZoom)
@@ -259,6 +324,8 @@ void HollowAudioProcessorEditor::tick()
 
     if (settingsPage.isVisible())
         settingsPage.refresh();
+    else if (browser.isVisible())
+        browser.followCurrent();
     else if (auto* panel = panelFor (currentModule))
         panel->refresh();
 
@@ -342,13 +409,9 @@ void HollowAudioProcessorEditor::syncPresetSelection()
             const int index = userPresetFiles.indexOf (userFile);
             id = index >= 0 ? userPresetIdOffset + index + 1 : 0;
         }
-        else
+        else if (name == "Init")
         {
-            const auto& list = presets::all();
-
-            for (size_t i = 0; i < list.size(); ++i)
-                if (name == list[i].name)
-                    id = (int) i + 1;
+            id = 1;
         }
 
         shownPreset = key;
@@ -411,7 +474,7 @@ void HollowAudioProcessorEditor::paintContent (Graphics& g)
 bool HollowAudioProcessorEditor::isInterestedInFileDrag (const StringArray& files)
 {
     for (const auto& f : files)
-        if (f.endsWithIgnoreCase (HollowAudioProcessor::presetExtension))
+        if (f.endsWithIgnoreCase (HollowAudioProcessor::presetExtension) || File (f).isDirectory())
             return true;
 
     return false;
@@ -434,10 +497,15 @@ void HollowAudioProcessorEditor::filesDropped (const StringArray& files, int, in
     Array<File> presetFiles;
 
     for (const auto& f : files)
-        if (f.endsWithIgnoreCase (HollowAudioProcessor::presetExtension))
+    {
+        if (File (f).isDirectory()) // a whole preset pack
+            presetFiles.addArray (File (f).findChildFiles (File::findFiles, true, String ("*") + HollowAudioProcessor::presetExtension));
+        else if (f.endsWithIgnoreCase (HollowAudioProcessor::presetExtension))
             presetFiles.add (File (f));
+    }
 
     settingsPage.importPresetFiles (presetFiles);
+    browser.refresh();
     chainStrip.refresh();
 }
 
@@ -482,6 +550,8 @@ void HollowAudioProcessorEditor::layoutContent()
     row.removeFromLeft (4);
     nextPreset.setBounds (row.removeFromLeft (28));
     row.removeFromLeft (10);
+    browseButton.setBounds (row.removeFromLeft (84));
+    row.removeFromLeft (6);
     saveButton.setBounds (row.removeFromLeft (70));
     row.removeFromLeft (6);
     diceButton.setBounds (row.removeFromLeft (106));
@@ -497,6 +567,7 @@ void HollowAudioProcessorEditor::layoutContent()
     area.removeFromRight (margin);
 
     settingsPage.setBounds (area);
+    browser.setBounds (area);
     chainStrip.setBounds (area.removeFromTop (chainHeight));
     area.removeFromTop (gap);
     modulationPanel.setBounds (area.removeFromBottom (modulationHeight));

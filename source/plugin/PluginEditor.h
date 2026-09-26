@@ -7,6 +7,7 @@
 #include "gui/FilterPanel.h"
 #include "gui/MeterPanel.h"
 #include "gui/ModulationPanel.h"
+#include "gui/PresetBrowser.h"
 #include "gui/SettingsPage.h"
 #include "gui/TrashPanel.h"
 
@@ -28,6 +29,7 @@ public:
     /** Menu page and save prompt (also used by the screenshot tool). */
     void showMenu (bool shouldShow);
     void showSaveDialog();
+    void showBrowser (bool shouldShow);
 
     /** Interface zoom (the layout happens at 100% and is scaled as a whole). */
     void setZoom (float newZoom);
@@ -110,17 +112,19 @@ private:
     gui::ModulationPanel modulationPanel;
     gui::MeterPanel meterPanel;
     gui::SettingsPage settingsPage;
+    gui::PresetBrowser browser;
     gui::SavePresetDialog saveDialog;
     gui::ParamToggle bypassButton;
 
     PresetBox presetBox;
     DropHint dropHint;
     ArrowButton undoButton { "Undo", false }, redoButton { "Redo", true };
-    juce::TextButton previousPreset { "<" }, nextPreset { ">" }, saveButton { "Save" }, diceButton { "Randomize" }, menuButton { "Menu" };
+    juce::TextButton previousPreset { "<" }, nextPreset { ">" }, browseButton { "Browse" }, saveButton { "Save" }, diceButton { "Randomize" },
+                     menuButton { "Menu" };
     juce::TooltipWindow tooltips { this, 700 };
 
     juce::Array<juce::File> userPresetFiles;
-    static constexpr int userPresetIdOffset = 1000;
+    static constexpr int userPresetIdOffset = 1000, browseItemId = 900;
 
     int currentModule = dsp::moduleTrash;
     juce::String shownPreset;
