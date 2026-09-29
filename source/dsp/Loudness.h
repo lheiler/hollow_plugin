@@ -308,20 +308,58 @@ inline void degradeStage (Spectrum& s, const DegradeSettings& d)
     s = blend (1.0 - m, s, m, worn, 0.9);
 }
 
+/** The compressor's static curve (downward and upward) plus make-up, for a detector level. */
+inline double dynamicsChangeDb (double detectorDb, const DynamicsSettings& d) noexcept
+{
+    const float ratio = std::max (1.0f, d.ratio);
+    return compressorGainDb ((float) detectorDb, d.thresholdDb, ratio, 6.0f)
+         + upwardGainDb ((float) detectorDb, d.thresholdDb, ratio, 6.0f, std::clamp (d.upward, 0.0f, 1.0f)) + d.makeupDb;
+}
+
 inline void dynamicsStage (Spectrum& s, const DynamicsSettings& d)
 {
     const double detector = toDb (totalPower (s)) + 9.0; // the peak detector rides well above the RMS
-    double change = compressorGainDb ((float) detector, d.thresholdDb, std::max (1.0f, d.ratio), 6.0f) + d.makeupDb;
+    double gateChange = 0.0;
 
     if (d.gateDb > DynamicsModule::gateOffDb)
     {
         const double open = detector - d.gateDb; // > 0: mostly open
-        change += open >= 6.0 ? 0.0 : (open >= -6.0 ? -3.0 - 0.5 * (6.0 - open) : -30.0);
+        gateChange = open >= 6.0 ? 0.0 : (open >= -6.0 ? -3.0 - 0.5 * (6.0 - open) : -30.0);
     }
 
     const double m = std::clamp ((double) d.mix, 0.0, 1.0);
-    const double gain = (1.0 - m) + m * std::pow (10.0, change / 20.0);
-    scale (s, gain * gain);
+    const auto amplitude = [m] (double changeDb) { return (1.0 - m) + m * std::pow (10.0, changeDb / 20.0); };
+
+    if (! d.multiband)
+    {
+        const double gain = amplitude (dynamicsChangeDb (detector, d) + gateChange);
+        scale (s, gain * gain);
+        return;
+    }
+
+    // Three bands, each with its own detector, curve and output gain. Linkwitz-Riley bands add up in phase,
+    // so the amplitudes of the band responses sum.
+    const auto weight = [] (int band, double f)
+    {
+        const auto lowPass = [f] (double fc) { return 1.0 / (1.0 + std::pow (f / fc, 4.0)); };
+        const double low = lowPass (DynamicsModule::crossovers[0]), high = 1.0 - lowPass (DynamicsModule::crossovers[1]);
+        return band == 0 ? low : (band == 1 ? (1.0 - low) * (1.0 - high) : high);
+    };
+
+    std::array<double, kDynamicsBands> amp {};
+
+    for (int b = 0; b < kDynamicsBands; ++b)
+    {
+        double power = 0.0;
+
+        for (int i = 0; i < kBands; ++i)
+            power += s[(size_t) i] * bandGain ([&] (double f) { return weight (b, f); }, i);
+
+        amp[(size_t) b] = amplitude (dynamicsChangeDb (toDb (power) + 9.0, d) + d.bandGainDb[(size_t) b] + gateChange);
+    }
+
+    for (int i = 0; i < kBands; ++i)
+        s[(size_t) i] *= bandGain ([&] (double f) { return weight (0, f) * amp[0] + weight (1, f) * amp[1] + weight (2, f) * amp[2]; }, i);
 }
 
 inline void echoStage (Spectrum& s, const EchoSettings& e, double rate)

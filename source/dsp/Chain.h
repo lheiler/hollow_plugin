@@ -83,6 +83,7 @@ namespace ranges
     inline constexpr Range dynRelease { 5.0f, 2000.0f, true };
     inline constexpr Range dynMakeup { 0.0f, 24.0f };
     inline constexpr Range gate { -80.0f, 0.0f };
+    inline constexpr Range dynBandGain { -24.0f, 12.0f };
     inline constexpr Range echoTime { 5.0f, 2000.0f, true };
     inline constexpr Range echoFeedback { 0.0f, 1.2f };
     inline constexpr Range lfoRate { 0.01f, 30.0f, true };
@@ -114,6 +115,7 @@ enum Destination
     destEchoTime, destEchoFeedback, destEchoTone, destEchoDrive, destEchoWobble, destEchoMix,
     destLfo1Rate, destLfo2Rate,
     destInputGain, destOutputGain, destGlobalMix,
+    destDynUpward, // added later: new destinations go at the end so saved patches keep theirs
     numDestinations
 };
 
@@ -131,6 +133,7 @@ inline const char* destinationName (int d) noexcept
         "Echo Time", "Echo Feedback", "Echo Tone", "Echo Drive", "Echo Wobble", "Echo Mix",
         "LFO 1 Rate", "LFO 2 Rate",
         "Input Gain", "Output Gain", "Global Mix",
+        "Dynamics Upward",
     };
     return names[std::clamp (d, 0, numDestinations - 1)];
 }
@@ -223,6 +226,7 @@ inline void applyModulation (ChainSettings& s, int d, float off) noexcept
         case destDegradeMix:     s.degrade.mix = r::unit.offset (s.degrade.mix, off); break;
         case destDynThreshold:   s.dynamics.thresholdDb = r::dynThreshold.offset (s.dynamics.thresholdDb, off); break;
         case destDynMix:         s.dynamics.mix = r::unit.offset (s.dynamics.mix, off); break;
+        case destDynUpward:      s.dynamics.upward = r::unit.offset (s.dynamics.upward, off); break;
         case destEchoTime:       s.echo.timeMs = r::echoTime.offset (s.echo.timeMs, off); break;
         case destEchoFeedback:   s.echo.feedback = r::echoFeedback.offset (s.echo.feedback, off); break;
         case destEchoTone:       s.echo.tone = r::bipolar.offset (s.echo.tone, off); break;

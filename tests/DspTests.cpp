@@ -677,6 +677,97 @@ static void testDelayDynamicsDegrade()
         CHECK_TRUE (rms (l.data() + 24000, 24000) < 1.0e-6, "gate closes on a signal 20 dB under its threshold");
     }
 
+    // Upward compression and the multiband mode
+    const auto runDynamics = [&] (const DynamicsSettings& s, std::vector<float>& l, std::vector<float>& r)
+    {
+        DynamicsModule d;
+        d.setSettings (s);
+        d.prepare (fs, 512);
+        runModule (d, l, r, 256, [&] (int) { d.setSettings (s); });
+    };
+
+    {
+        DynamicsSettings s;
+        s.thresholdDb = -20.0f;
+        s.ratio = 4.0f;
+        s.upward = 1.0f;
+        auto l = sine (1000.0, dbToGain (-40.0f), fs, 96000), r = l;
+        runDynamics (s, l, r);
+        CHECK_NEAR (db (amplitudeAt (l.data() + 48000, 48000, 1000.0, fs)), -25.0, 1.5, "upward: -40 dB under a -20 dB threshold at 4:1 is lifted 15 dB");
+
+        auto quietL = sine (1000.0, dbToGain (-100.0f), fs, 48000), quietR = quietL;
+        runDynamics (s, quietL, quietR);
+        CHECK_NEAR (db (amplitudeAt (quietL.data() + 24000, 24000, 1000.0, fs)), -100.0, 0.5, "upward leaves near-silence alone");
+    }
+
+    {
+        DynamicsSettings s;
+        s.multiband = true;
+        s.ratio = 1.0f;
+
+        for (double f : { 40.0, 88.0, 1000.0, 2500.0, 9000.0 })
+        {
+            auto l = sine (f, 0.3, fs, 48000), r = l;
+            runDynamics (s, l, r);
+            CHECK_NEAR (db (amplitudeAt (l.data() + 24000, 24000, f, fs) / 0.3), 0.0, 0.1, "multiband at 1:1 is flat at " + std::to_string ((int) f) + " Hz");
+        }
+
+        s.bandGainDb = { 6.0f, 0.0f, -6.0f };
+        auto low = sine (40.0, 0.2, fs, 48000), lowR = low;
+        auto high = sine (9000.0, 0.2, fs, 48000), highR = high;
+        runDynamics (s, low, lowR);
+        runDynamics (s, high, highR);
+        CHECK_NEAR (db (amplitudeAt (low.data() + 24000, 24000, 40.0, fs) / 0.2), 6.0, 0.3, "band levels: low +6 dB lifts a 40 Hz tone");
+        CHECK_NEAR (db (amplitudeAt (high.data() + 24000, 24000, 9000.0, fs) / 0.2), -6.0, 0.3, "band levels: high -6 dB lowers a 9 kHz tone");
+    }
+
+    {
+        // A loud bass line and a quiet hi-hat tone: one band ducks everything, three bands only the bass
+        const auto both = [&] (bool multiband, double& bassDb, double& highDb)
+        {
+            DynamicsSettings s;
+            s.multiband = multiband;
+            s.thresholdDb = -24.0f;
+            s.ratio = 8.0f;
+            s.attackMs = 2.0f;
+            auto l = sine (60.0, dbToGain (-6.0f), fs, 96000);
+            const auto hat = sine (6000.0, dbToGain (-36.0f), fs, 96000);
+
+            for (size_t i = 0; i < l.size(); ++i)
+                l[i] += hat[i];
+
+            auto r = l;
+            runDynamics (s, l, r);
+            bassDb = db (amplitudeAt (l.data() + 48000, 48000, 60.0, fs));
+            highDb = db (amplitudeAt (l.data() + 48000, 48000, 6000.0, fs));
+        };
+
+        double singleBass, singleHigh, multiBass, multiHigh;
+        both (false, singleBass, singleHigh);
+        both (true, multiBass, multiHigh);
+        CHECK_TRUE (singleHigh < -40.0, "single band: the loud bass ducks the quiet highs too (" + std::to_string (singleHigh) + " dB)");
+        CHECK_TRUE (multiBass < -12.0 && std::abs (multiHigh + 36.0) < 1.0,
+                    "multiband: the bass is compressed (" + std::to_string (multiBass) + " dB), the highs are left alone (" + std::to_string (multiHigh) + " dB)");
+    }
+
+    {
+        // Switching modes crossfades: no step in a steady tone
+        DynamicsModule d;
+        DynamicsSettings s;
+        s.ratio = 1.0f;
+        d.setSettings (s);
+        d.prepare (fs, 512);
+        auto l = sine (200.0, 0.25, fs, 48000), r = l;
+        float worstStep = 0.0f;
+        int block = 0;
+        runModule (d, l, r, 256, [&] (int) { s.multiband = (block++ / 20) % 2 == 1; d.setSettings (s); });
+
+        for (size_t i = 1; i < l.size(); ++i)
+            worstStep = std::max (worstStep, std::abs (l[i] - l[i - 1]));
+
+        CHECK_TRUE (worstStep < 0.012f, "switching single / multiband doesn't click (largest step " + std::to_string (worstStep) + ")");
+    }
+
     {
         DegradeModule d;
         DegradeSettings s;
@@ -966,6 +1057,12 @@ static void testLevel()
         { "dynamics -18 dB 2:1 +4 makeup", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.thresholdDb = -18.0f; s.dynamics.ratio = 2.0f; s.dynamics.makeupDb = 4.0f; }, 2.0 },
         { "dynamics -40 dB 20:1, mix 50%", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.thresholdDb = -40.0f; s.dynamics.ratio = 20.0f; s.dynamics.mix = 0.5f; }, 2.5 },
         { "dynamics gate -20 dB", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.ratio = 1.0f; s.dynamics.gateDb = -20.0f; }, 3.0 },
+        { "dynamics upward 60%, -20 dB 3:1", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.thresholdDb = -20.0f; s.dynamics.ratio = 3.0f; s.dynamics.upward = 0.6f; }, 2.5 },
+        { "dynamics multiband -30 dB 4:1", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.multiband = true; s.dynamics.thresholdDb = -30.0f; s.dynamics.ratio = 4.0f; }, 2.5 },
+        { "dynamics multiband OTT-ish: -24 dB 6:1, upward 70%", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.multiband = true; s.dynamics.thresholdDb = -24.0f;
+                                                                                        s.dynamics.ratio = 6.0f; s.dynamics.upward = 0.7f; }, 3.0 },
+        { "dynamics multiband, low +6 dB, high -6 dB", [&] (ChainSettings& s) { only (s, moduleDynamics); s.dynamics.multiband = true; s.dynamics.ratio = 2.0f;
+                                                                               s.dynamics.bandGainDb = { 6.0f, 0.0f, -6.0f }; }, 2.0 },
         { "echo 60% feedback, 50% mix", [&] (ChainSettings& s) { only (s, moduleEcho); s.echo.feedback = 0.6f; s.echo.mix = 0.5f; s.echo.drive = 0.0f; }, 2.0 },
         { "echo runaway 115%", [&] (ChainSettings& s) { only (s, moduleEcho); s.echo.feedback = 1.15f; s.echo.mix = 0.5f; }, 3.0 },
     };

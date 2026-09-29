@@ -44,6 +44,18 @@ The convolver has no latency: the first 128 taps run as a direct filter, the nex
 the rest in 2,048-sample partitions, each stage starting exactly one block into the impulse. New impulses are built on
 a worker thread and crossfaded in over 50 ms; in the tests the result matches direct convolution to within 0.01 %.
 
+## Dynamics
+
+A stereo-linked peak detector drives a soft-knee compressor (6 dB knee) with separate attack and release. *Upward*
+mirrors the curve below the threshold: quiet material is lifted towards the threshold by the same ratio, by at most
+30 dB, and not at all for near-silence (below -90 dBFS, fading in up to -70 dBFS), so digital silence isn't pumped up.
+The lift reads a 10 ms peak envelope, otherwise every zero crossing of a waveform would look like silence.
+
+*Multiband* splits at 88 Hz and 2.5 kHz (the crossovers of OTT) with the same Linkwitz-Riley crossovers as the
+distortion, so the untouched bands sum flat. Each band has its own detector and compressor, then its level. The
+parallel mix happens band by band, so the dry part stays in phase with the split, and switching modes crossfades over
+20 ms. Auto Level splits its spectrum the same way and runs the curve per band.
+
 ## Motion, Degrade, Echo
 
 - The frequency shifter uses a pair of all-pass chains (Olli Niemitalo's 90-degree network) to build an analytic
@@ -110,9 +122,10 @@ preset, dice roll or reorder. Host automation doesn't create steps.
 
 ## How it's tested
 
-- **DSP unit tests** (`scripts/test-dsp.sh`, 135 checks, native): shaper bounds and auto gain, oversampler alignment at
+- **DSP unit tests** (`scripts/test-dsp.sh`, 151 checks, native): shaper bounds and auto gain, oversampler alignment at
   every factor and aliasing at 1x against 8x, filter curves against the audio, frequency shifter image rejection,
-  convolution against direct convolution, runaway echo bounds, dynamics, degrade, chain latency and bypass, and every
+  convolution against direct convolution, runaway echo bounds, dynamics (upward lift, multiband flatness, band
+  independence, click-free mode switching), degrade, chain latency and bypass, and every
   Auto Level estimate against measured loudness.
 - **Plugin harness** (`tools/Snapshot.cpp`, run on Windows by `scripts/test-windows.sh`): every factory preset
   (and the preset pack, with `--write-pack`), 40 dice rolls, 44.1 to 192 kHz, parameter automation every block, state save and load, user presets and import,

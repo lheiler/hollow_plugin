@@ -70,6 +70,13 @@ namespace id
     inline const juce::String dynMakeup { "dyMakeup" };
     inline const juce::String dynGate { "dyGate" };
     inline const juce::String dynMix { "dyMix" };
+    inline const juce::String dynMode { "dyMode" };      // single band / multiband
+    inline const juce::String dynUpward { "dyUpward" };
+    inline juce::String dynBandGain (int band)
+    {
+        static const char* const ids[] = { "dyLow", "dyMid", "dyHigh" };
+        return ids[band];
+    }
 
     // Echo
     inline const juce::String echoTime { "ecTime" };
@@ -133,7 +140,8 @@ private:
     Raw convImpulse, convSize, convDamp, convReverse, convMix;
     Raw motionMode, motionRate, motionSync, motionDivision, motionDepth, motionFeedback, motionFreq, motionSpread, motionMix;
     Raw degradeWow, degradeFlutter, degradeAge, degradeNoise, degradeCrackle, degradeDropout, degradeGlitch, degradeMix;
-    Raw dynThreshold, dynRatio, dynAttack, dynRelease, dynMakeup, dynGate, dynMix;
+    Raw dynThreshold, dynRatio, dynAttack, dynRelease, dynMakeup, dynGate, dynMix, dynMode, dynUpward;
+    std::array<Raw, dsp::kDynamicsBands> dynBandGains;
     Raw echoTime, echoSync, echoDivision, echoFeedback, echoTone, echoDrive, echoWobble, echoPingPong, echoMix;
     std::array<LfoRaw, 2> lfos;
     Raw envAttack, envRelease, envGain;

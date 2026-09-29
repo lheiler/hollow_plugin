@@ -134,6 +134,7 @@ namespace
             { dsp::destEchoDrive, "ecDrive" }, { dsp::destEchoWobble, "ecWobble" }, { dsp::destEchoMix, "ecMix" },
             { dsp::destLfo1Rate, "lfo1Rate" }, { dsp::destLfo2Rate, "lfo2Rate" },
             { dsp::destInputGain, "inGain" }, { dsp::destOutputGain, "outGain" }, { dsp::destGlobalMix, "mix" },
+            { dsp::destDynUpward, "dyUpward" },
         };
         return table;
     }
@@ -323,7 +324,12 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
                          floatParam (id::dynRelease, "Dynamics Release", toJuce (r::dynRelease), 120.0f, msAttributes()),
                          floatParam (id::dynMakeup, "Dynamics Makeup", toJuce (r::dynMakeup), 0.0f, dbAttributes()),
                          floatParam (id::dynGate, "Dynamics Gate", toJuce (r::gate), -80.0f, gate),
-                         floatParam (id::dynMix, "Dynamics Mix", toJuce (r::unit, 100.0f), 100.0f, percentAttributes()));
+                         floatParam (id::dynMix, "Dynamics Mix", toJuce (r::unit, 100.0f), 100.0f, percentAttributes()),
+                         choiceParam (id::dynMode, "Dynamics Mode", { "Single band", "Multiband" }, 0),
+                         floatParam (id::dynUpward, "Dynamics Upward", toJuce (r::unit, 100.0f), 0.0f, percentAttributes()));
+
+        for (int b = 0; b < dsp::kDynamicsBands; ++b) // the same Low / Mid / High names as the trash bands
+            group->addChild (floatParam (id::dynBandGain (b), String ("Dynamics ") + bandNames[b], toJuce (r::dynBandGain), 0.0f, dbAttributes()));
         layout.add (std::move (group));
     }
 
@@ -454,6 +460,11 @@ Binding::Binding (AudioProcessorValueTreeState& state)
     dynMakeup = get (id::dynMakeup);
     dynGate = get (id::dynGate);
     dynMix = get (id::dynMix);
+    dynMode = get (id::dynMode);
+    dynUpward = get (id::dynUpward);
+
+    for (int b = 0; b < dsp::kDynamicsBands; ++b)
+        dynBandGains[(size_t) b] = get (id::dynBandGain (b));
 
     echoTime = get (id::echoTime);
     echoSync = get (id::echoSync);
@@ -561,6 +572,11 @@ dsp::ChainSettings Binding::read (bool offline) const noexcept
     s.dynamics.makeupDb = dynMakeup->load();
     s.dynamics.gateDb = dynGate->load();
     s.dynamics.mix = pct (dynMix);
+    s.dynamics.multiband = dynMode->load() >= 0.5f;
+    s.dynamics.upward = pct (dynUpward);
+
+    for (size_t b = 0; b < dsp::kDynamicsBands; ++b)
+        s.dynamics.bandGainDb[b] = dynBandGains[b]->load();
 
     s.echo.timeMs = echoTime->load();
     s.echo.feedback = pct (echoFeedback);

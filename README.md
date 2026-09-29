@@ -70,8 +70,9 @@ half-speed repeats on a 16th-note grid.
 </td>
 <td width="50%" valign="top">
 <img src="docs/images/dynamics.jpg" alt="Dynamics"><br>
-<b>Dynamics</b>: a gate into a soft-knee compressor with parallel mix. Pull a distortion's tail up into sustain or
-chop it into gated textures.
+<b>Dynamics</b>: a gate into a compressor that pushes loud parts down and, with <i>Upward</i>, pulls quiet parts up.
+Single band, or multiband like OTT or Serum's: three bands, each compressed on its own, with a level per band. Pull a
+distortion's tail up into sustain or chop it into gated textures.
 </td>
 </tr>
 <tr>

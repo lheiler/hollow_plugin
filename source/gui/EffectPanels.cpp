@@ -314,18 +314,33 @@ void DegradePanel::drawView (Graphics& g, Rectangle<float> area)
 
 //==============================================================================
 DynamicsPanel::DynamicsPanel (PanelContext& c)
-    : ModulePanel (c, dsp::moduleDynamics)
+    : ModulePanel (c, dsp::moduleDynamics),
+      mode (state, pid::dynMode, { "Single band", "Multiband" }, 2, colours::forModule (dsp::moduleDynamics))
 {
+    addAndMakeVisible (mode);
     addAndMakeVisible (view);
     view.draw = [this] (Graphics& g, Rectangle<float> r) { drawView (g, r); };
+    mode.setTooltip ("Multiband splits the sound at 88 Hz and 2.5 kHz and compresses each band on its own, "
+                     "like OTT or Serum's multiband compressor");
+    mode.onChange = [this] (int) { refresh(); repaint(); };
 
     addKnob (pid::dynThreshold, "Threshold");
     addKnob (pid::dynRatio, "Ratio");
     addKnob (pid::dynAttack, "Attack");
     addKnob (pid::dynRelease, "Release");
     addKnob (pid::dynMakeup, "Makeup");
+    addKnob (pid::dynUpward, "Upward");
     addKnob (pid::dynGate, "Gate");
     addKnob (pid::dynMix, "Mix");
+    addKnob (pid::dynBandGain (0), "Low");
+    addKnob (pid::dynBandGain (1), "Mid");
+    addKnob (pid::dynBandGain (2), "High");
+
+    knobs[5]->getSlider().setTooltip ("Upward compression: lifts everything below the threshold towards it, by the same ratio. "
+                                      "Quiet tails, noise and room come up - the OTT sound, with Multiband");
+    knobs[8]->getSlider().setTooltip ("Level of the low band (below 88 Hz), multiband only");
+    knobs[9]->getSlider().setTooltip ("Level of the mid band (88 Hz to 2.5 kHz), multiband only");
+    knobs[10]->getSlider().setTooltip ("Level of the high band (above 2.5 kHz), multiband only");
 }
 
 void DynamicsPanel::refresh()
@@ -338,12 +353,30 @@ void DynamicsPanel::refresh()
     reductionDb = gr < reductionDb ? gr : jmin (0.0f, reductionDb + 0.8f);
     grHistory[(size_t) historyPos] = reductionDb;
     historyPos = (historyPos + 1) % (int) grHistory.size();
+
+    for (size_t b = 0; b < dsp::kDynamicsBands; ++b)
+    {
+        const float bandIn = Decibels::gainToDecibels (m.dynBandPeak[b].exchange (0.0f), -100.0f);
+        bandInDb[b] = bandIn > bandInDb[b] ? bandIn : jmax (bandIn, bandInDb[b] - 1.5f);
+        bandChangeDb[b] += 0.5f * (m.dynBandGain[b].load() - bandChangeDb[b]);
+    }
+
+    // The band levels only do something in multiband mode
+    const bool multiband = getParameterValue (state, pid::dynMode) > 0.5f;
+
+    for (size_t k = 8; k < knobs.size(); ++k)
+    {
+        knobs[k]->setEnabled (multiband);
+        knobs[k]->setAlpha (multiband ? 1.0f : 0.4f);
+    }
+
     view.repaint();
 }
 
 void DynamicsPanel::paint (Graphics& g)
 {
-    drawCard (g, viewCard.toFloat(), "Transfer  /  gain reduction");
+    const bool multiband = getParameterValue (state, pid::dynMode) > 0.5f;
+    drawCard (g, viewCard.toFloat(), multiband ? "Transfer  /  bands" : "Transfer  /  gain reduction");
     drawCard (g, controlCard.toFloat(), "Compressor + gate");
     drawRoutes (g, routesArea.toFloat());
 }
@@ -354,7 +387,11 @@ void DynamicsPanel::resized()
     controlCard = area.removeFromRight (470);
     area.removeFromRight (10);
     viewCard = area;
-    view.setBounds (viewCard.reduced (12, 8).withTrimmedTop (20));
+
+    auto v = viewCard.reduced (12, 8).withTrimmedTop (20);
+    mode.setBounds (v.removeFromTop (28).withWidth (jmin (v.getWidth(), 300)));
+    v.removeFromTop (10);
+    view.setBounds (v);
 
     auto c = controlCard.reduced (12, 8).withTrimmedTop (20);
     routesArea = c.removeFromBottom (64);
@@ -374,11 +411,15 @@ void DynamicsPanel::drawView (Graphics& g, Rectangle<float> area)
 
     auto square = area.removeFromLeft (jmin (area.getWidth() * 0.45f, area.getHeight())).reduced (2.0f);
     area.removeFromLeft (14.0f);
+
+    if (s.multiband)
+        drawBands (g, area, s, colour);
+
     auto meter = area.removeFromRight (28.0f);
     area.removeFromRight (10.0f);
     auto history = area;
 
-    // Static curve
+    // Static curve (downward and upward)
     drawViewFrame (g, square);
     constexpr float lo = -60.0f, hi = 6.0f;
     const auto toX = [&] (float db) { return jmap (jlimit (lo, hi, db), lo, hi, square.getX(), square.getRight()); };
@@ -399,7 +440,8 @@ void DynamicsPanel::drawView (Graphics& g, Rectangle<float> area)
         if (s.gateDb > dsp::DynamicsModule::gateOffDb && in < s.gateDb)
             return -100.0f;
 
-        return in + dsp::compressorGainDb (in, s.thresholdDb, s.ratio, 6.0f) + s.makeupDb;
+        return in + dsp::compressorGainDb (in, s.thresholdDb, s.ratio, 6.0f)
+                  + dsp::upwardGainDb (in, s.thresholdDb, s.ratio, 6.0f, s.upward) + s.makeupDb;
     };
 
     Path curve;
@@ -421,7 +463,18 @@ void DynamicsPanel::drawView (Graphics& g, Rectangle<float> area)
         g.setColour (colour);
         g.strokePath (curve, PathStrokeType (2.0f));
 
-        if (inputDb > lo)
+        if (s.multiband)
+        {
+            // One dot per band, lifted or lowered by its band level
+            for (int b = 0; b < dsp::kDynamicsBands; ++b)
+                if (bandInDb[(size_t) b] > lo)
+                {
+                    const auto dot = Point<float> (toX (bandInDb[(size_t) b]), toY (outFor (bandInDb[(size_t) b]) + s.bandGainDb[(size_t) b]));
+                    g.setColour (colours::forBand (b));
+                    g.fillEllipse (Rectangle<float> (9.0f, 9.0f).withCentre (dot));
+                }
+        }
+        else if (inputDb > lo)
         {
             const auto dot = Point<float> (toX (inputDb), toY (outFor (inputDb)));
             g.setColour (colours::accent);
@@ -437,6 +490,9 @@ void DynamicsPanel::drawView (Graphics& g, Rectangle<float> area)
             g.fillRect (Rectangle<float>::leftTopRightBottom (square.getX(), square.getY(), toX (s.gateDb), square.getBottom()));
         }
     }
+
+    if (s.multiband)
+        return;
 
     // Gain reduction history and meter
     drawViewFrame (g, history);
@@ -477,6 +533,77 @@ void DynamicsPanel::drawView (Graphics& g, Rectangle<float> area)
     g.fillRect (meter.reduced (3.0f).withHeight (meter.reduced (3.0f).getHeight() * jlimit (0.0f, 1.0f, -reductionDb / 24.0f)));
     g.setColour (colours::text);
     g.drawText (String (reductionDb, 1), meter.withY (meter.getBottom() - 14.0f).withHeight (14.0f).expanded (12.0f, 0.0f), Justification::centred, false);
+}
+
+void DynamicsPanel::drawBands (Graphics& g, Rectangle<float> area, const dsp::DynamicsSettings& s, Colour colour)
+{
+    // Each band: its input level, where the compressor puts it (and the band level), and the threshold across all
+    drawViewFrame (g, area);
+    auto inner = area.reduced (10.0f, 8.0f);
+    inner.removeFromTop (14.0f);
+    auto labels = inner.removeFromBottom (32.0f);
+    constexpr float lo = -60.0f, hi = 6.0f;
+    const auto toY = [&] (float db) { return jmap (jlimit (lo, hi, db), lo, hi, inner.getBottom(), inner.getY()); };
+
+    g.setFont (monoFont (9.5f));
+
+    for (float db = -48.0f; db <= 0.0f; db += 12.0f)
+    {
+        g.setColour (db == 0.0f ? colours::gridStrong : colours::grid);
+        g.fillRect (Rectangle<float> (inner.getX(), std::round (toY (db)), inner.getWidth(), 1.0f));
+        g.setColour (colours::textFaint);
+        g.drawText (String ((int) db), Rectangle<float> (inner.getX(), toY (db) - 12.0f, 30.0f, 11.0f), Justification::centredLeft, false);
+    }
+
+    const float columnWidth = inner.getWidth() / (float) dsp::kDynamicsBands;
+    const char* const names[] = { "Low", "Mid", "High" };
+    const char* const splits[] = { "88 Hz", "2.5 kHz" };
+
+    for (int b = 0; b < dsp::kDynamicsBands; ++b)
+    {
+        const auto column = Rectangle<float> (inner.getX() + columnWidth * (float) b, inner.getY(), columnWidth, inner.getHeight());
+        const auto bar = column.withSizeKeepingCentre (jmin (54.0f, columnWidth * 0.4f), column.getHeight());
+        const auto bandColour = colour == colours::textFaint ? colours::textFaint : colours::forBand (b);
+        const float in = bandInDb[(size_t) b];
+        const float change = bandChangeDb[(size_t) b] + s.makeupDb + s.bandGainDb[(size_t) b];
+
+        if (b > 0)
+        {
+            // the crossover: its frequency on top, the divider below it
+            g.setColour (colours::gridStrong);
+            g.fillRect (Rectangle<float> (column.getX(), area.getY() + 20.0f, 1.0f, area.getHeight() - 26.0f));
+            g.setColour (colours::textFaint);
+            g.drawText (splits[b - 1], Rectangle<float> (column.getX() - 40.0f, area.getY() + 5.0f, 80.0f, 12.0f), Justification::centred, false);
+        }
+
+        if (in > lo)
+        {
+            const float out = in + change;
+
+            // input level
+            g.setColour (bandColour.withAlpha (0.22f));
+            g.fillRect (Rectangle<float>::leftTopRightBottom (bar.getX(), toY (in), bar.getRight(), bar.getBottom()));
+
+            // what the band becomes: orange where it's pushed down, steel where it's lifted
+            const float top = toY (jmax (in, out)), bottom = toY (jmin (in, out));
+            g.setColour ((out < in ? colours::accent : colours::steel).withAlpha (0.55f));
+            g.fillRect (Rectangle<float>::leftTopRightBottom (bar.getX(), top, bar.getRight(), bottom));
+            g.setColour (bandColour);
+            g.fillRect (Rectangle<float> (bar.getX() - 4.0f, toY (out) - 1.5f, bar.getWidth() + 8.0f, 3.0f));
+        }
+
+        auto label = labels.withX (column.getX()).withWidth (columnWidth);
+        drawLabel (g, names[b], label.removeFromTop (16.0f), Justification::centred, bandColour, 9.5f);
+        g.setColour (colours::text);
+        g.setFont (monoFont (10.5f));
+        g.drawText ((change > 0.05f ? "+" : "") + String (std::abs (change) < 0.05f ? 0.0f : change, 1) + " dB", label, Justification::centred, false);
+    }
+
+    // threshold across the bands
+    g.setColour (colours::ink.withAlpha (0.55f));
+    g.fillRect (Rectangle<float> (inner.getX(), std::round (toY (s.thresholdDb)), inner.getWidth(), 1.0f));
+    g.setFont (monoFont (9.5f));
+    g.drawText ("threshold", Rectangle<float> (inner.getRight() - 70.0f, toY (s.thresholdDb) - 13.0f, 68.0f, 12.0f), Justification::centredRight, false);
 }
 
 //==============================================================================

@@ -82,9 +82,12 @@ public:
 
 private:
     void drawView (juce::Graphics&, juce::Rectangle<float>);
+    void drawBands (juce::Graphics&, juce::Rectangle<float>, const dsp::DynamicsSettings&, juce::Colour);
 
+    ChoiceButtons mode;
     Display view;
     float inputDb = -100.0f, reductionDb = 0.0f;
+    std::array<float, dsp::kDynamicsBands> bandInDb { -100.0f, -100.0f, -100.0f }, bandChangeDb {};
     std::array<float, 200> grHistory {};
     int historyPos = 0;
     juce::Rectangle<int> viewCard, controlCard, routesArea;

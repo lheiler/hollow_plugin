@@ -32,6 +32,8 @@ struct MeterValues
     std::array<std::atomic<float>, dsp::kTrashBands> trashPeaks {};    // linear, band input
     std::atomic<float> dynReduction { 0.0f };                          // dB, <= 0
     std::atomic<float> dynInput { 0.0f };                              // linear peak
+    std::array<std::atomic<float>, dsp::kDynamicsBands> dynBandPeak {};   // linear peak per band (multiband)
+    std::array<std::atomic<float>, dsp::kDynamicsBands> dynBandGain {};   // dB, current gain change per band
     std::atomic<bool> gateOpen { true };
     std::atomic<float> degradePitch { 0.0f }, dropoutGain { 1.0f };
     std::atomic<bool> glitching { false };

@@ -233,6 +233,12 @@ void HollowAudioProcessor::publishMeters() noexcept
 
     detail::atomicMin (meters.dynReduction, chain.getDynamics().takeMaxReduction());
     detail::atomicMax (meters.dynInput, chain.getDynamics().takeInputPeak());
+
+    for (int b = 0; b < dsp::kDynamicsBands; ++b)
+    {
+        detail::atomicMax (meters.dynBandPeak[(size_t) b], chain.getDynamics().takeBandPeak (b));
+        meters.dynBandGain[(size_t) b] = chain.getDynamics().getBandGainDb (b);
+    }
     meters.gateOpen = chain.getDynamics().isGateOpen();
     meters.degradePitch = chain.getDegrade().getPitchCents();
     meters.dropoutGain = chain.getDegrade().getDropoutGain();
@@ -766,6 +772,11 @@ void HollowAudioProcessor::randomize()
     setPlain (pid::dynThreshold, between (-36.0f, -10.0f));
     setPlain (pid::dynRatio, between (2.0f, 10.0f));
     setPlain (pid::dynGate, chance (0.25f) ? between (-60.0f, -30.0f) : -80.0f);
+    setPlain (pid::dynMode, chance (0.35f) ? 1.0f : 0.0f);
+    setPlain (pid::dynUpward, chance (0.4f) ? between (10.0f, 70.0f) : 0.0f);
+
+    for (int b = 0; b < dsp::kDynamicsBands; ++b)
+        setPlain (pid::dynBandGain (b), between (-6.0f, 3.0f));
 
     setPlain (pid::echoTime, between (60.0f, 700.0f));
     setPlain (pid::echoSync, chance (0.4f) ? 1.0f : 0.0f);

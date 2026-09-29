@@ -836,6 +836,14 @@ void writeScreenshots (const File& outDir)
         HollowAudioProcessor proc;
         proc.loadPreset (presetIndex (shot.preset));
         proc.getUiState().setProperty ("module", shot.module, nullptr);
+
+        if (shot.module == hl::dsp::moduleDynamics) // show the multiband mode
+        {
+            set (proc.getState(), pid::dynMode, 1.0f);
+            set (proc.getState(), pid::dynUpward, 45.0f);
+            set (proc.getState(), pid::dynBandGain (0), 3.0f);
+            set (proc.getState(), pid::dynBandGain (2), -2.0f);
+        }
         prepare (proc, rate);
         proc.waitForImpulse (5000);
 
